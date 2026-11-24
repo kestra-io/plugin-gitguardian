@@ -10,7 +10,7 @@ import lombok.Setter;
 import java.time.Instant;
 import java.util.List;
 
-/** A GitGuardian secret incident as returned by `GET /v1/incidents/secrets` and `GET /v1/incidents/secrets/{id}`. Occurrences are deliberately not mapped: they carry code context and belong in a dedicated task rather than in every list output. */
+/** A secret incident from `GET /v1/incidents/secrets`. Occurrences are not mapped: they carry code context. */
 @Getter
 @Setter
 @NoArgsConstructor

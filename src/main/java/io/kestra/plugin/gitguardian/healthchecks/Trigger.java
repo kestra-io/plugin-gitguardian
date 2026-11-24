@@ -127,7 +127,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
             .limit(cap)
             .toList();
 
-        // Keys no longer listed belong to streaks that ended; a new streak gets a new firstStartedAt, so forgetting them is safe and keeps the state small.
+        // A new streak gets a new firstStartedAt, so forgetting keys of ended streaks is safe.
         var remembered = new TreeSet<String>();
         delivered.stream().filter(current::containsKey).forEach(remembered::add);
         batch.forEach(entry -> remembered.add(entry.getKey()));

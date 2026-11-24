@@ -133,7 +133,7 @@ public class Create extends AbstractGitGuardianTask implements RunnableTask<Crea
             } catch (GeneralSecurityException e) {
                 throw new IllegalStateException(NOT_ENCRYPTED.formatted(rName, honeytoken.getId(), e.getMessage()), e);
             }
-            // Without a configured key, Kestra's encrypt() returns its input unchanged; never let a decoy credential reach the outputs in clear.
+            // encrypt() returns its input unchanged without a configured key.
             if (plainToken.equals(encryptedToken.getValue())) {
                 throw new IllegalStateException(NOT_ENCRYPTED.formatted(rName, honeytoken.getId(), "no encryption key is configured"));
             }
