@@ -3,15 +3,10 @@ package io.kestra.plugin.gitguardian.incidents;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
-import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.triggers.TriggerContext;
-import io.kestra.core.models.triggers.TriggerEvaluationResult;
 import io.kestra.core.models.triggers.TriggerOutput;
-import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
-import io.kestra.plugin.gitguardian.AbstractGitGuardianTrigger;
-import io.kestra.plugin.gitguardian.GitGuardianClient;
+import io.kestra.plugin.gitguardian.AbstractIncidentTrigger;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -22,12 +17,9 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 
 @SuperBuilder
 @ToString
@@ -60,19 +52,18 @@ import java.util.Set;
 
                 tasks:
                   - id: each_incident
-                    type: io.kestra.plugin.core.flow.ForEach
+                    type: io.kestra.plugin.core.flow.Loop
                     values: "{{ trigger.incidents }}"
                     tasks:
                       - id: notify
                         type: io.kestra.plugin.slack.SlackIncomingWebhook
                         url: "{{ secret('SLACK_WEBHOOK') }}"
-                        payload: |
-                          {"text": ":rotating_light: {{ fromJson(taskrun.value).incidentName }} ({{ fromJson(taskrun.value).severity }}, {{ fromJson(taskrun.value).validity }}) {{ fromJson(taskrun.value).gitguardianUrl }}"}
+                        messageText: ":rotating_light: {{ fromJson(item.value).incidentName }} ({{ fromJson(item.value).severity }}, {{ fromJson(item.value).validity }}) {{ fromJson(item.value).gitguardianUrl }}"
 
                       - id: assign
                         type: io.kestra.plugin.gitguardian.incidents.Assign
                         apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                        incidentId: "{{ fromJson(taskrun.value).id }}"
+                        incidentId: "{{ fromJson(item.value).id }}"
                         assigneeEmail: security-oncall@company.com
 
                 triggers:
@@ -93,7 +84,7 @@ import java.util.Set;
 
                 tasks:
                   - id: each_incident
-                    type: io.kestra.plugin.core.flow.ForEach
+                    type: io.kestra.plugin.core.flow.Loop
                     values: "{{ trigger.incidents }}"
                     tasks:
                       - id: ticket
@@ -102,8 +93,8 @@ import java.util.Set;
                         username: "{{ secret('JIRA_USER') }}"
                         password: "{{ secret('JIRA_TOKEN') }}"
                         projectKey: SEC
-                        summary: "Leaked secret: {{ fromJson(taskrun.value).incidentName }}"
-                        description: "{{ fromJson(taskrun.value).gitguardianUrl }}"
+                        summary: "Leaked secret: {{ fromJson(item.value).incidentName }}"
+                        description: "{{ fromJson(item.value).gitguardianUrl }}"
 
                 triggers:
                   - id: on_incident
@@ -114,11 +105,7 @@ import java.util.Set;
         )
     }
 )
-public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput<Trigger.Output> {
-    private static final String SCOPE = "incidents:read";
-    private static final int PAGE_SIZE = 100;
-    /** GitGuardian's `date_after` bound has second granularity; overlapping by one second and de-duplicating client-side never skips a tie. */
-    private static final Duration OVERLAP = Duration.ofSeconds(1);
+public class Trigger extends AbstractIncidentTrigger<Incident> implements TriggerOutput<Trigger.Output> {
 
     @Schema(title = "Only incidents in this status", description = "`TRIGGERED`, `ASSIGNED`, `RESOLVED`, or `IGNORED`. Any status when omitted.")
     @PluginProperty(group = "processing")
@@ -145,48 +132,37 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
     private Property<@Min(0) @Max(100) Integer> riskScoreMin;
 
     @Override
-    public Optional<TriggerEvaluationResult> eval(ConditionContext conditionContext, TriggerContext context) throws Exception {
-        var runContext = conditionContext.getRunContext();
-        var logger = runContext.logger();
-        var kv = runContext.namespaceKv(context.getNamespace());
-        var key = watermarkKey("gitguardian_incidents", context.getFlowId(), context.getTriggerId());
-        var filters = filters(runContext);
-
-        try (var client = client(runContext)) {
-            var watermark = readWatermark(kv, key).orElse(null);
-            if (watermark == null) {
-                var newest = newest(client, filters);
-                var baseline = newest != null ? new Watermark(newest.getDate(), Set.of(String.valueOf(newest.getId()))) : new Watermark(Instant.now(), Set.of());
-                persistWatermark(kv, key, baseline);
-                logger.info("GitGuardian incidents trigger initialized; baseline {}. Only incidents triggered after it will fire.", baseline.getTimestamp());
-                return Optional.empty();
-            }
-
-            var query = new LinkedHashMap<String, Object>(filters);
-            query.put("ordering", "date");
-            query.put("per_page", PAGE_SIZE);
-            query.put("date_after", watermark.getTimestamp().minus(OVERLAP).toString());
-            var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
-            var undelivered = collectUndelivered(client, "/incidents/secrets", query, SCOPE, Incident.class, watermark, cap, Incident::getDate, incident -> String.valueOf(incident.getId()), logger);
-            if (undelivered.isEmpty()) {
-                return Optional.empty();
-            }
-
-            var batch = oldest(undelivered, cap, Incident::getDate, incident -> String.valueOf(incident.getId()));
-            persistWatermark(kv, key, advance(watermark, batch, Incident::getDate, incident -> String.valueOf(incident.getId())));
-            return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().incidents(batch).count(batch.size()).build()));
-        }
+    protected String path() {
+        return "/incidents/secrets";
     }
 
-    private Incident newest(GitGuardianClient client, Map<String, Object> filters) throws Exception {
-        var query = new LinkedHashMap<String, Object>(filters);
-        query.put("ordering", "-date");
-        query.put("per_page", 1);
-        var page = client.getPage("/incidents/secrets", query, null, SCOPE, Incident.class);
-        return page.items().isEmpty() ? null : page.items().getFirst();
+    @Override
+    protected String keyPrefix() {
+        return "gitguardian_incidents";
     }
 
-    private Map<String, Object> filters(RunContext runContext) throws Exception {
+    @Override
+    protected Class<Incident> itemType() {
+        return Incident.class;
+    }
+
+    @Override
+    protected Instant dateOf(Incident incident) {
+        return incident.getDate();
+    }
+
+    @Override
+    protected String idOf(Incident incident) {
+        return String.valueOf(incident.getId());
+    }
+
+    @Override
+    protected io.kestra.core.models.tasks.Output output(java.util.List<Incident> batch) {
+        return Output.builder().incidents(batch).count(batch.size()).build();
+    }
+
+    @Override
+    protected Map<String, Object> filters(RunContext runContext) throws Exception {
         var filters = new LinkedHashMap<String, Object>();
         filters.put("status", runContext.render(status).as(IncidentStatus.class).map(IncidentStatus::apiValue).orElse(null));
         filters.put("severity", runContext.render(severity).as(Severity.class).map(Severity::apiValue).orElse(null));
