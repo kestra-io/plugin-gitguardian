@@ -25,7 +25,11 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Update a GitGuardian secret incident",
-    description = "Sets the severity and/or custom tags of a secret incident via `PATCH /v1/incidents/secrets/{id}`. Custom tags replace the incident's current custom tags; missing tags are created in the workspace. Requires the `incidents:write` scope."
+    description = """
+        Sets the severity and/or custom tags of a secret incident via `PATCH /v1/incidents/secrets/{id}`. \
+        Custom tags replace the incident's current custom tags; missing tags are created in the workspace. \
+        Requires the `incidents:write` scope.
+        """
 )
 @Plugin(
     examples = {

@@ -126,9 +126,6 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @PluginProperty(group = "processing")
     private Property<String> ordering;
 
-
-
-
     @Override
     public Output run(RunContext runContext) throws Exception {
         var query = query(runContext);

@@ -1,9 +1,6 @@
 package io.kestra.plugin.gitguardian;
 
-/**
- * User-facing error for any failed GitGuardian API call: HTTP error status or an unparsable response.
- * {@link #getStatusCode()} is {@code null} when the failure was not an HTTP error response.
- */
+/** Failed GitGuardian API call; the status code is null when it was not an HTTP error. */
 public class GitGuardianApiException extends Exception {
     private final Integer statusCode;
 

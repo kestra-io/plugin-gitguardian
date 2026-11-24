@@ -74,29 +74,86 @@ class HealthChecksTest {
         assertThat(output.getResultUrl().contains("started_at_after"), is(true));
     }
 
-    @Test
-    void triggerFiresOncePerFailureStreak(WireMockRuntimeInfo wireMock) throws Exception {
-        stubFor(get(urlPathEqualTo("/v1/health-checks")).withQueryParam("status", equalTo("fail"))
-            .willReturn(okJson("[" + check(1, 100, "fail", "2099-01-01T10:00:00Z", "github-installation") + "," + check(2, 200, "fail", "2099-01-01T09:00:00Z", "slack-workspace") + "]")));
-
-        var trigger = Trigger.builder()
+    private Trigger trigger(WireMockRuntimeInfo wireMock, java.util.List<String> types, int maxItemsPerPoll) {
+        return Trigger.builder()
             .id(IdUtils.create()).type(Trigger.class.getName())
             .apiUrl(Property.ofValue(wireMock.getHttpBaseUrl())).apiKey(Property.ofValue("k"))
-            .types(Property.ofValue(java.util.List.of("github-installation")))
+            .types(types.isEmpty() ? null : Property.ofValue(types))
+            .maxItemsPerPoll(Property.ofValue(maxItemsPerPoll))
             .interval(Duration.ofMinutes(10))
             .build();
+    }
+
+    private static void stubFailing(String... checks) {
+        stubFor(get(urlPathEqualTo("/v1/health-checks")).withQueryParam("status", equalTo("fail"))
+            .willReturn(okJson("[" + String.join(",", checks) + "]")));
+    }
+
+    @Test
+    void triggerFiresOncePerFailureStreakAndIgnoresPreexistingFailures(WireMockRuntimeInfo wireMock) throws Exception {
+        stubFailing(check(2, 200, "fail", "2099-01-01T09:00:00Z", "slack-workspace"));
+
+        var trigger = trigger(wireMock, java.util.List.of(), 100);
         var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
 
-        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+        assertThat("failures present at the first poll are the baseline", trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
 
+        stubFailing(check(2, 200, "fail", "2099-01-01T09:00:00Z", "slack-workspace"), check(1, 100, "fail", "2099-01-01T10:00:00Z", "github-installation"));
         var fired = trigger.eval(ctx.getKey(), ctx.getValue().context());
         assertThat(fired.isPresent(), is(true));
         var checks = (java.util.List<?>) fired.get().trigger().getVariables().get("checks");
         assertThat(checks, hasSize(1));
         assertThat(((Map<?, ?>) ((Map<?, ?>) checks.getFirst()).get("instance")).get("id"), is(100L));
 
-        stubFor(get(urlPathEqualTo("/v1/health-checks")).withQueryParam("status", equalTo("fail"))
-            .willReturn(okJson("[" + check(3, 100, "fail", "2099-01-01T10:00:00Z", "github-installation") + "]")));
+        stubFailing(check(2, 200, "fail", "2099-01-01T09:00:00Z", "slack-workspace"), check(3, 100, "fail", "2099-01-01T10:00:00Z", "github-installation"));
         assertThat("same streak, new run id, must not re-fire", trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+    }
+
+    @Test
+    void triggerDeliversALongRunningCheckThatFailsAfterANewerStreak(WireMockRuntimeInfo wireMock) throws Exception {
+        stubFailing();
+        var trigger = trigger(wireMock, java.util.List.of(), 100);
+        var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+
+        stubFailing(check(2, 200, "fail", "2099-01-01T10:00:00Z", "github-installation"));
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(true));
+
+        stubFailing(check(2, 200, "fail", "2099-01-01T10:00:00Z", "github-installation"), check(1, 100, "fail", "2099-01-01T09:00:00Z", "slack-workspace"));
+        var late = trigger.eval(ctx.getKey(), ctx.getValue().context());
+
+        assertThat("an older streak reported after a newer one was delivered must still fire", late.isPresent(), is(true));
+        var checks = (java.util.List<?>) late.get().trigger().getVariables().get("checks");
+        assertThat(((Map<?, ?>) ((Map<?, ?>) checks.getFirst()).get("instance")).get("id"), is(100L));
+    }
+
+    @Test
+    void triggerFiresANewStreakOfAnInstanceThatRecovered(WireMockRuntimeInfo wireMock) throws Exception {
+        stubFailing(check(1, 100, "fail", "2099-01-01T09:00:00Z", "github-installation"));
+        var trigger = trigger(wireMock, java.util.List.of(), 100);
+        var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+
+        stubFailing();
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+
+        stubFailing(check(5, 100, "fail", "2099-01-02T09:00:00Z", "github-installation"));
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(true));
+    }
+
+    @Test
+    void triggerCapsTheBatchAndDeliversTheRestNext(WireMockRuntimeInfo wireMock) throws Exception {
+        stubFailing();
+        var trigger = trigger(wireMock, java.util.List.of(), 1);
+        var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+
+        stubFailing(check(1, 100, "fail", "2099-01-01T10:00:00Z", "github-installation"), check(2, 200, "fail", "2099-01-01T09:00:00Z", "slack-workspace"));
+        var first = (java.util.List<?>) trigger.eval(ctx.getKey(), ctx.getValue().context()).get().trigger().getVariables().get("checks");
+        var second = (java.util.List<?>) trigger.eval(ctx.getKey(), ctx.getValue().context()).get().trigger().getVariables().get("checks");
+
+        assertThat(((Map<?, ?>) ((Map<?, ?>) first.getFirst()).get("instance")).get("id"), is(200L));
+        assertThat(((Map<?, ?>) ((Map<?, ?>) second.getFirst()).get("instance")).get("id"), is(100L));
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
     }
 }

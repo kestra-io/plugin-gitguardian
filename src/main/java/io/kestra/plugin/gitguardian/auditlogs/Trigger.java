@@ -21,7 +21,7 @@ import lombok.experimental.SuperBuilder;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.Set;
@@ -34,8 +34,9 @@ import java.util.Set;
 @Schema(
     title = "Trigger a flow on new GitGuardian audit log events",
     description = """
-        Polls `GET /v1/audit_logs` at `interval` and starts one execution per poll carrying every new event since \
-        the last poll (`trigger.events`), so a burst of activity produces one execution, not one per event. \
+        Polls `GET /v1/audit_logs` at `interval` and starts one execution per poll carrying the new events since \
+        the last poll (`trigger.events`), so a burst of activity produces one execution, not one per event. A poll \
+        carries at most `maxItemsPerPoll` events (default 100) to keep the output small; the rest fire on the next polls. \
         Optionally restrict to `eventNames`. The watermark (newest delivered date plus the IDs sharing it) is kept \
         in the flow namespace KV store; on the first poll it is seeded at the current time and nothing fires. \
         Requires the `audit_logs:read` scope.
@@ -92,45 +93,33 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
             return Optional.empty();
         }
 
-        var pending = new ArrayList<AuditLog>();
+        var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
+        var undelivered = new ArrayList<AuditLog>();
         try (var client = client(runContext)) {
-            var names = rEventNames.isEmpty() ? java.util.Collections.<String>singletonList(null) : rEventNames;
+            var names = rEventNames.isEmpty() ? Collections.<String>singletonList(null) : rEventNames;
             for (var name : names) {
                 var query = new LinkedHashMap<String, Object>();
                 query.put("event_name", name);
                 query.put("per_page", PAGE_SIZE);
                 query.put("date_after", watermark.getTimestamp().minus(OVERLAP).toString());
                 query.values().removeIf(value -> value == null);
-                client.walk("/audit_logs", query, SCOPE, AuditLog.class, page -> {
-                    for (var event : page) {
-                        if (event.getDate() == null) {
-                            runContext.logger().warn("Audit log event {} has no date and cannot be delivered", event.getId());
-                        } else if (!watermark.isDelivered(event.getDate(), String.valueOf(event.getId()))) {
-                            pending.add(event);
-                        }
-                    }
-                    return true;
-                });
+                undelivered.addAll(collectUndelivered(client, "/audit_logs", query, SCOPE, AuditLog.class, watermark, cap, AuditLog::getDate, event -> String.valueOf(event.getId()), runContext.logger()));
             }
         }
 
-        if (pending.isEmpty()) {
+        if (undelivered.isEmpty()) {
             return Optional.empty();
         }
-        pending.sort(Comparator.comparing(AuditLog::getDate).thenComparing(AuditLog::getId));
-        var next = watermark;
-        for (var event : pending) {
-            next = next.advance(event.getDate(), String.valueOf(event.getId()));
-        }
-        persistWatermark(kv, key, next);
+        var batch = oldest(undelivered, cap, AuditLog::getDate, event -> String.valueOf(event.getId()));
+        persistWatermark(kv, key, advance(watermark, batch, AuditLog::getDate, event -> String.valueOf(event.getId())));
 
-        return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().events(pending).count(pending.size()).build()));
+        return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().events(batch).count(batch.size()).build()));
     }
 
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
-        @Schema(title = "New audit log events since the previous poll, oldest first")
+        @Schema(title = "New audit log events since the previous poll, oldest first", description = "At most `maxItemsPerPoll` per execution.")
         private final java.util.List<AuditLog> events;
 
         @Schema(title = "Number of new events")

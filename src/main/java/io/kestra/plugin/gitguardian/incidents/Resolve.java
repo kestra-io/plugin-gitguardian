@@ -24,7 +24,11 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Resolve a GitGuardian secret incident",
-    description = "Marks a secret incident as resolved via `POST /v1/incidents/secrets/{id}/resolve`, recording whether the secret was revoked. Typically the last step of an automated rotation flow. Requires the `incidents:write` scope."
+    description = """
+        Marks a secret incident as resolved via `POST /v1/incidents/secrets/{id}/resolve`, recording whether \
+        the secret was revoked. Typically the last step of an automated rotation flow. Requires the \
+        `incidents:write` scope.
+        """
 )
 @Plugin(
     examples = {

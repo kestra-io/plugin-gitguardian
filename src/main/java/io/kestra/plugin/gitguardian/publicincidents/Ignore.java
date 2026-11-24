@@ -24,7 +24,10 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Ignore a GitGuardian Public Monitoring incident",
-    description = "Ignores a public incident with one or more reasons via `POST /v1/public-incidents/secrets/{id}/ignore`. Requires the `incidents:write` scope."
+    description = """
+        Ignores a public incident with one or more reasons via `POST \
+        /v1/public-incidents/secrets/{id}/ignore`. Requires the `incidents:write` scope.
+        """
 )
 @Plugin(
     examples = {

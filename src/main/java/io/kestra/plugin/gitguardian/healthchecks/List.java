@@ -26,7 +26,11 @@ import java.util.LinkedHashMap;
 @NoArgsConstructor
 @Schema(
     title = "List GitGuardian integration health checks",
-    description = "Lists the latest health check run per integration instance (VCS, ticketing, messaging, registries) from `GET /v1/health-checks`, optionally filtered by `integrationType` and `status`. Requires the `health_checks:read` scope."
+    description = """
+        Lists the latest health check run per integration instance (VCS, ticketing, messaging, registries) \
+        from `GET /v1/health-checks`, optionally filtered by `integrationType` and `status`. Requires the \
+        `health_checks:read` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -75,9 +79,6 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @Schema(title = "Only runs started before this date")
     @PluginProperty(group = "processing")
     private Property<Instant> startedBefore;
-
-
-
 
     @Override
     public Output run(RunContext runContext) throws Exception {

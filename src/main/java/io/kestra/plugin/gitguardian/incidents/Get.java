@@ -25,7 +25,10 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Get a GitGuardian secret incident",
-    description = "Fetches one secret incident by ID from `GET /v1/incidents/secrets/{id}`. Requires the `incidents:read` scope."
+    description = """
+        Fetches one secret incident by ID from `GET /v1/incidents/secrets/{id}`. Requires the \
+        `incidents:read` scope.
+        """
 )
 @Plugin(
     examples = {

@@ -7,6 +7,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.gitguardian.AbstractGitGuardianTask;
+import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -23,7 +24,11 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Revoke a GitGuardian honeytoken",
-    description = "Revokes an active or triggered honeytoken via `POST /v1/honeytokens/{id}/revoke` and closes its events, for example when the environment it was placed in is decommissioned. Requires the `honeytokens:write` scope."
+    description = """
+        Revokes an active or triggered honeytoken via `POST /v1/honeytokens/{id}/revoke` and closes its \
+        events, for example when the environment it was placed in is decommissioned. Requires the \
+        `honeytokens:write` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -63,7 +68,7 @@ public class Revoke extends AbstractGitGuardianTask implements RunnableTask<Revo
         runContext.logger().info("Revoking GitGuardian honeytoken {}", rId);
 
         try (var client = client(runContext)) {
-            var honeytoken = client.post("/honeytokens/" + rId + "/revoke", null, SCOPE, Honeytoken.class);
+            var honeytoken = client.post("/honeytokens/" + GitGuardianClient.segment(rId) + "/revoke", null, SCOPE, Honeytoken.class);
             if (honeytoken == null) {
                 throw new IllegalStateException("Empty response from the GitGuardian API when revoking honeytoken %s.".formatted(rId));
             }

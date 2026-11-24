@@ -25,11 +25,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/**
- * Wraps a Kestra {@link HttpClient} with GitGuardian's token authentication, query-string building,
- * `Link`-header cursor pagination, 429 retries and non-2xx error mapping. One instance is scoped to a
- * single task run or trigger poll and must be closed by its owner.
- */
+/** Wraps a Kestra {@link HttpClient} with GitGuardian's token authentication, query-string building, `Link`-header cursor pagination, 429 retries and non-2xx error mapping. One instance is scoped to a single task run or trigger poll and must be closed by its owner. */
 public final class GitGuardianClient implements Closeable {
     public static final String USER_AGENT = "kestra-plugin-gitguardian";
 
@@ -166,6 +162,11 @@ public final class GitGuardianClient implements Closeable {
             return collection.stream().map(String::valueOf).collect(Collectors.joining(","));
         }
         return String.valueOf(value);
+    }
+
+    /** Percent-encodes one path segment so a user-supplied ID can never add segments or a query string to the URL. */
+    public static String segment(String value) {
+        return encode(value).replace("+", "%20");
     }
 
     private static String encode(String value) {

@@ -7,10 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/**
- * Location of one secret match inside a scanned document. The matched string itself (the `match`
- * field GitGuardian returns) is intentionally not mapped so the secret never lands in execution outputs.
- */
+/** Location of one secret match inside a scanned document. The matched string itself (the `match` field GitGuardian returns) is intentionally not mapped so the secret never lands in execution outputs. */
 @Getter
 @Setter
 @NoArgsConstructor

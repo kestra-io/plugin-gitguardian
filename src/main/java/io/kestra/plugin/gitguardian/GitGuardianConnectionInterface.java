@@ -1,11 +1,6 @@
 package io.kestra.plugin.gitguardian;
 
-/**
- * Shared {@code @Schema} wording for the GitGuardian connection properties. A task and a trigger cannot
- * share a superclass ({@link io.kestra.core.models.tasks.Task} vs.
- * {@link io.kestra.core.models.triggers.AbstractTrigger}), so both redeclare these fields; keeping the
- * titles and descriptions here stops the two declarations from drifting apart.
- */
+/** Shared `@Schema` wording for the connection properties, which a task and a trigger must both redeclare. */
 public interface GitGuardianConnectionInterface {
     String DEFAULT_API_URL = "https://api.gitguardian.com";
 

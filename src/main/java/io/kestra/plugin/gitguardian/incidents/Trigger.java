@@ -24,11 +24,10 @@ import lombok.experimental.SuperBuilder;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @SuperBuilder
 @ToString
@@ -38,10 +37,11 @@ import java.util.Optional;
 @Schema(
     title = "Trigger a flow when GitGuardian detects a secret incident",
     description = """
-        Polls `GET /v1/incidents/secrets` at `interval` and starts one execution per incident whose last trigger \
-        date (`date`) is newer than the recorded watermark, oldest first, one per poll cycle. GitGuardian bumps \
+        Polls `GET /v1/incidents/secrets` at `interval` and starts one execution per poll carrying the incidents whose \
+        last trigger date (`date`) is newer than the recorded watermark, oldest first (`trigger.incidents`), at most \
+        `maxItemsPerPoll` (default 100) at a time; the rest fire on the next polls. GitGuardian bumps \
         `date` when a resolved or ignored incident is triggered again, so regressions fire too; check \
-        `trigger.incident.regression` if they should be handled differently. Filters (`status`, `severity`, \
+        `regression` on each incident if they should be handled differently. Filters (`status`, `severity`, \
         `validity`, `detectorGroupName`, `tags`, `riskScoreMin`) are applied server-side. The watermark (newest \
         delivered `date` plus the IDs sharing it) lives in the flow namespace KV store, so nothing is re-fired \
         after a restart. On the very first poll only the current baseline is recorded and nothing fires, which \
@@ -59,17 +59,21 @@ import java.util.Optional;
                 namespace: company.security
 
                 tasks:
-                  - id: notify
-                    type: io.kestra.plugin.slack.SlackIncomingWebhook
-                    url: "{{ secret('SLACK_WEBHOOK') }}"
-                    payload: |
-                      {"text": ":rotating_light: {{ trigger.incident.incidentName }} ({{ trigger.incident.severity }}, {{ trigger.incident.validity }}) {{ trigger.incident.gitguardianUrl }}"}
+                  - id: each_incident
+                    type: io.kestra.plugin.core.flow.ForEach
+                    values: "{{ trigger.incidents }}"
+                    tasks:
+                      - id: notify
+                        type: io.kestra.plugin.slack.SlackIncomingWebhook
+                        url: "{{ secret('SLACK_WEBHOOK') }}"
+                        payload: |
+                          {"text": ":rotating_light: {{ fromJson(taskrun.value).incidentName }} ({{ fromJson(taskrun.value).severity }}, {{ fromJson(taskrun.value).validity }}) {{ fromJson(taskrun.value).gitguardianUrl }}"}
 
-                  - id: assign
-                    type: io.kestra.plugin.gitguardian.incidents.Assign
-                    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                    incidentId: "{{ trigger.incident.id }}"
-                    assigneeEmail: security-oncall@company.com
+                      - id: assign
+                        type: io.kestra.plugin.gitguardian.incidents.Assign
+                        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+                        incidentId: "{{ fromJson(taskrun.value).id }}"
+                        assigneeEmail: security-oncall@company.com
 
                 triggers:
                   - id: on_incident
@@ -88,14 +92,18 @@ import java.util.Optional;
                 namespace: company.security
 
                 tasks:
-                  - id: ticket
-                    type: io.kestra.plugin.jira.issues.Create
-                    baseUrl: https://company.atlassian.net
-                    username: "{{ secret('JIRA_USER') }}"
-                    password: "{{ secret('JIRA_TOKEN') }}"
-                    projectKey: SEC
-                    summary: "Leaked secret: {{ trigger.incident.incidentName }}"
-                    description: "{{ trigger.incident.gitguardianUrl }}"
+                  - id: each_incident
+                    type: io.kestra.plugin.core.flow.ForEach
+                    values: "{{ trigger.incidents }}"
+                    tasks:
+                      - id: ticket
+                        type: io.kestra.plugin.jira.issues.Create
+                        baseUrl: https://company.atlassian.net
+                        username: "{{ secret('JIRA_USER') }}"
+                        password: "{{ secret('JIRA_TOKEN') }}"
+                        projectKey: SEC
+                        summary: "Leaked secret: {{ fromJson(taskrun.value).incidentName }}"
+                        description: "{{ fromJson(taskrun.value).gitguardianUrl }}"
 
                 triggers:
                   - id: on_incident
@@ -148,39 +156,25 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
             var watermark = readWatermark(kv, key).orElse(null);
             if (watermark == null) {
                 var newest = newest(client, filters);
-                var baseline = newest != null ? new Watermark(newest.getDate(), java.util.Set.of(String.valueOf(newest.getId()))) : new Watermark(Instant.now(), java.util.Set.of());
+                var baseline = newest != null ? new Watermark(newest.getDate(), Set.of(String.valueOf(newest.getId()))) : new Watermark(Instant.now(), Set.of());
                 persistWatermark(kv, key, baseline);
                 logger.info("GitGuardian incidents trigger initialized; baseline {}. Only incidents triggered after it will fire.", baseline.getTimestamp());
                 return Optional.empty();
             }
 
-            var pending = new ArrayList<Incident>();
             var query = new LinkedHashMap<String, Object>(filters);
             query.put("ordering", "date");
             query.put("per_page", PAGE_SIZE);
             query.put("date_after", watermark.getTimestamp().minus(OVERLAP).toString());
-            client.walk("/incidents/secrets", query, SCOPE, Incident.class, page -> {
-                for (var incident : page) {
-                    if (incident.getDate() == null) {
-                        logger.warn("Incident {} has no date and cannot be delivered", incident.getId());
-                    } else if (!watermark.isDelivered(incident.getDate(), String.valueOf(incident.getId()))) {
-                        pending.add(incident);
-                    }
-                }
-                return true;
-            });
-
-            if (pending.isEmpty()) {
+            var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
+            var undelivered = collectUndelivered(client, "/incidents/secrets", query, SCOPE, Incident.class, watermark, cap, Incident::getDate, incident -> String.valueOf(incident.getId()), logger);
+            if (undelivered.isEmpty()) {
                 return Optional.empty();
             }
-            pending.sort(Comparator.comparing(Incident::getDate).thenComparing(Incident::getId));
-            var next = pending.getFirst();
 
-            persistWatermark(kv, key, watermark.advance(next.getDate(), String.valueOf(next.getId())));
-            if (pending.size() > 1) {
-                logger.info("GitGuardian incident {} fires now; {} more pending for the next polls (shorten `interval` to drain faster)", next.getId(), pending.size() - 1);
-            }
-            return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().incident(next).build()));
+            var batch = oldest(undelivered, cap, Incident::getDate, incident -> String.valueOf(incident.getId()));
+            persistWatermark(kv, key, advance(watermark, batch, Incident::getDate, incident -> String.valueOf(incident.getId())));
+            return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().incidents(batch).count(batch.size()).build()));
         }
     }
 
@@ -208,7 +202,10 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
-        @Schema(title = "The incident that fired this execution")
-        private final Incident incident;
+        @Schema(title = "New incidents since the previous poll, oldest first", description = "At most `maxItemsPerPoll` per execution.")
+        private final java.util.List<Incident> incidents;
+
+        @Schema(title = "Number of incidents in this execution")
+        private final Integer count;
     }
 }

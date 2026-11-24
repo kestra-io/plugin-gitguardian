@@ -25,7 +25,10 @@ import java.util.LinkedHashMap;
 @NoArgsConstructor
 @Schema(
     title = "List GitGuardian teams",
-    description = "Lists workspace teams from `GET /v1/teams`, for example to resolve a team ID before filtering sources or routing incidents. Requires the `teams:read` scope."
+    description = """
+        Lists workspace teams from `GET /v1/teams`, for example to resolve a team ID before filtering \
+        sources or routing incidents. Requires the `teams:read` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -61,9 +64,6 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @Schema(title = "Only the global team (`true`) or only regular teams (`false`)")
     @PluginProperty(group = "processing")
     private Property<Boolean> global;
-
-
-
 
     @Override
     public Output run(RunContext runContext) throws Exception {

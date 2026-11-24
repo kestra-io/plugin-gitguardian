@@ -25,7 +25,10 @@ import java.util.LinkedHashMap;
 @NoArgsConstructor
 @Schema(
     title = "List GitGuardian workspace members",
-    description = "Lists members from `GET /v1/members`, for example to validate an assignee email before `incidents.Assign` or to audit inactive accounts. Requires the `members:read` scope."
+    description = """
+        Lists members from `GET /v1/members`, for example to validate an assignee email before \
+        `incidents.Assign` or to audit inactive accounts. Requires the `members:read` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -67,9 +70,6 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @Schema(title = "Ordering", description = "`created_at` or `last_login`; prefix with `-` for descending.")
     @PluginProperty(group = "processing")
     private Property<String> ordering;
-
-
-
 
     @Override
     public Output run(RunContext runContext) throws Exception {

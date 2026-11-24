@@ -1,5 +1,6 @@
 package io.kestra.plugin.gitguardian.healthchecks;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -11,6 +12,7 @@ import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.plugin.gitguardian.AbstractGitGuardianTrigger;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -19,11 +21,12 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 
 @SuperBuilder
 @ToString
@@ -35,9 +38,11 @@ import java.util.Set;
     description = """
         Polls `GET /v1/health-checks` at `interval` for integration instances whose latest run has one of `statuses` \
         (default `FAIL`) and starts one execution per poll listing the instances that entered that state since the \
-        previous poll (`trigger.checks`). An integration that keeps failing does not re-fire: the watermark tracks \
-        `firstStartedAt`, the start of the current streak, so only new streaks fire. On the first poll the watermark \
-        is seeded at the current time and nothing fires. Requires the `health_checks:read` scope.
+        previous poll (`trigger.checks`), at most `maxItemsPerPoll` (default 100) at a time. An integration that keeps \
+        failing does not re-fire: the trigger remembers each delivered `instance@firstStartedAt` pair, where \
+        `firstStartedAt` is the start of the current streak, so only new streaks fire. Tracking delivered pairs rather \
+        than a time watermark means a long-running check that reports its failure late is still delivered. On the first \
+        poll the failures already present are recorded and nothing fires. Requires the `health_checks:read` scope.
         """
 )
 @Plugin(
@@ -85,18 +90,14 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
     public Optional<TriggerEvaluationResult> eval(ConditionContext conditionContext, TriggerContext context) throws Exception {
         var runContext = conditionContext.getRunContext();
         var kv = runContext.namespaceKv(context.getNamespace());
-        var key = watermarkKey("gitguardian_healthchecks", context.getFlowId(), context.getTriggerId());
+        var key = watermarkKey("gitguardian_healthchecks_delivered", context.getFlowId(), context.getTriggerId());
         var rStatuses = runContext.render(statuses).asList(HealthCheckStatus.class);
         var rTypes = runContext.render(types).asList(String.class);
 
-        var watermark = readWatermark(kv, key).orElse(null);
-        if (watermark == null) {
-            persistWatermark(kv, key, new Watermark(Instant.now(), Set.of()));
-            runContext.logger().info("GitGuardian health checks trigger initialized; only failures starting after now will fire.");
-            return Optional.empty();
-        }
+        var state = readState(kv, key, DeliveredChecks.class).orElse(null);
+        var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
 
-        var pending = new ArrayList<HealthCheck>();
+        var current = new LinkedHashMap<String, HealthCheck>();
         try (var client = client(runContext)) {
             for (var status : rStatuses.isEmpty() ? java.util.List.of(HealthCheckStatus.FAIL) : rStatuses) {
                 var query = new LinkedHashMap<String, Object>();
@@ -104,12 +105,8 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
                 query.put("per_page", PAGE_SIZE);
                 client.walk("/health-checks", query, SCOPE, HealthCheck.class, page -> {
                     for (var check : page) {
-                        var streakStart = check.getFirstStartedAt() != null ? check.getFirstStartedAt() : check.getStartedAt();
-                        var instanceId = check.getInstance() != null ? check.getType() + ":" + check.getInstance().getId() : check.getType() + ":" + check.getId();
-                        if (streakStart != null
-                            && (rTypes.isEmpty() || rTypes.contains(check.getType()))
-                            && !watermark.isDelivered(streakStart, instanceId)) {
-                            pending.add(check);
+                        if (streakStart(check) != null && (rTypes.isEmpty() || rTypes.contains(check.getType()))) {
+                            current.put(streakKey(check), check);
                         }
                     }
                     return true;
@@ -117,19 +114,48 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
             }
         }
 
-        if (pending.isEmpty()) {
+        if (state == null) {
+            persistState(kv, key, new DeliveredChecks(new TreeSet<>(current.keySet())));
+            runContext.logger().info("GitGuardian health checks trigger initialized; {} failure(s) already present will not fire.", current.size());
             return Optional.empty();
         }
-        pending.sort(Comparator.comparing((HealthCheck check) -> check.getFirstStartedAt() != null ? check.getFirstStartedAt() : check.getStartedAt()));
-        var next = watermark;
-        for (var check : pending) {
-            var streakStart = check.getFirstStartedAt() != null ? check.getFirstStartedAt() : check.getStartedAt();
-            var instanceId = check.getInstance() != null ? check.getType() + ":" + check.getInstance().getId() : check.getType() + ":" + check.getId();
-            next = next.advance(streakStart, instanceId);
-        }
-        persistWatermark(kv, key, next);
 
-        return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().checks(pending).count(pending.size()).build()));
+        var delivered = state.getKeys() != null ? state.getKeys() : Set.<String>of();
+        var undelivered = current.entrySet().stream().filter(entry -> !delivered.contains(entry.getKey())).toList();
+        var batch = undelivered.stream()
+            .sorted(Map.Entry.comparingByValue(Comparator.comparing(Trigger::streakStart)))
+            .limit(cap)
+            .toList();
+
+        // Keys no longer listed belong to streaks that ended; a new streak gets a new firstStartedAt, so forgetting them is safe and keeps the state small.
+        var remembered = new TreeSet<String>();
+        delivered.stream().filter(current::containsKey).forEach(remembered::add);
+        batch.forEach(entry -> remembered.add(entry.getKey()));
+        persistState(kv, key, new DeliveredChecks(remembered));
+
+        if (batch.isEmpty()) {
+            return Optional.empty();
+        }
+        var checks = batch.stream().map(Map.Entry::getValue).toList();
+        return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().checks(checks).count(checks.size()).build()));
+    }
+
+    private static Instant streakStart(HealthCheck check) {
+        return check.getFirstStartedAt() != null ? check.getFirstStartedAt() : check.getStartedAt();
+    }
+
+    private static String streakKey(HealthCheck check) {
+        var instanceId = check.getInstance() != null ? check.getInstance().getId() : check.getId();
+        return check.getType() + ":" + instanceId + "@" + streakStart(check);
+    }
+
+    /** Delivered `type:instanceId@firstStartedAt` keys of streaks still listed as matching. */
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class DeliveredChecks {
+        private Set<String> keys;
     }
 
     @Builder

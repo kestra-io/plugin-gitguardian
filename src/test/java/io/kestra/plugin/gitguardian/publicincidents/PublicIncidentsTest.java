@@ -25,6 +25,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 
 @KestraTest
@@ -120,7 +121,30 @@ class PublicIncidentsTest {
         assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
         var fired = trigger.eval(ctx.getKey(), ctx.getValue().context());
         assertThat(fired.isPresent(), is(true));
-        assertThat(((Map<?, ?>) fired.get().trigger().getVariables().get("incident")).get("id"), is(2L));
+        var incidents = (java.util.List<?>) fired.get().trigger().getVariables().get("incidents");
+        assertThat(incidents, hasSize(1));
+        assertThat(((Map<?, ?>) incidents.getFirst()).get("id"), is(2L));
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+    }
+
+    @Test
+    void triggerCapsTheBatchAndDeliversTheRestOnTheNextPoll(WireMockRuntimeInfo wireMock) throws Exception {
+        stubFor(get(urlPathEqualTo("/v1/public-incidents/secrets")).withQueryParam("ordering", equalTo("-date"))
+            .willReturn(okJson("[" + incident(1, "2026-09-01T10:00:00Z") + "]")));
+        stubFor(get(urlPathEqualTo("/v1/public-incidents/secrets")).withQueryParam("ordering", equalTo("date"))
+            .willReturn(okJson("[" + incident(1, "2026-09-01T10:00:00Z") + "," + incident(2, "2026-09-01T10:10:00Z") + "," + incident(3, "2026-09-01T10:20:00Z") + "]")));
+
+        var trigger = Trigger.builder()
+            .id(IdUtils.create()).type(Trigger.class.getName()).apiUrl(Property.ofValue(base(wireMock))).apiKey(Property.ofValue("k"))
+            .maxItemsPerPoll(Property.ofValue(1)).interval(Duration.ofMinutes(2)).build();
+        var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
+
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+        var first = (java.util.List<?>) trigger.eval(ctx.getKey(), ctx.getValue().context()).get().trigger().getVariables().get("incidents");
+        var second = (java.util.List<?>) trigger.eval(ctx.getKey(), ctx.getValue().context()).get().trigger().getVariables().get("incidents");
+
+        assertThat(((Map<?, ?>) first.getFirst()).get("id"), is(2L));
+        assertThat(((Map<?, ?>) second.getFirst()).get("id"), is(3L));
         assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
     }
 }

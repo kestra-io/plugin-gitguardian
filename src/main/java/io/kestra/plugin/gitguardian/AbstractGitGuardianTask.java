@@ -18,20 +18,14 @@ import lombok.experimental.SuperBuilder;
 
 import java.time.Duration;
 
-/**
- * Base class for every GitGuardian task: holds the connection properties and builds a
- * {@link GitGuardianClient} scoped to a single task run. Not itself exposed as a plugin.
- */
+/** Base class for every GitGuardian task: connection properties and a per-run client. */
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
 public abstract class AbstractGitGuardianTask extends Task implements GitGuardianConnectionInterface {
-    /**
-     * Apache HC5 defaults to no timeout at all, so an unresponsive endpoint would block the worker thread
-     * indefinitely. The read timeout is an idle timeout, not a cap on the total time of a paginated walk.
-     */
+    /** Apache HC5 has no default timeout; the read timeout is an idle timeout, not a cap on a paginated walk. */
     protected static final Duration HTTP_CONNECT_TIMEOUT = Duration.ofSeconds(10);
     protected static final Duration HTTP_READ_IDLE_TIMEOUT = Duration.ofSeconds(60);
 

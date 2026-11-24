@@ -23,7 +23,10 @@ import java.util.LinkedHashMap;
 @NoArgsConstructor
 @Schema(
     title = "Assign a GitGuardian Public Monitoring incident",
-    description = "Assigns a public incident to a member by email or ID via `POST /v1/public-incidents/secrets/{id}/assign`. Requires the `incidents:write` scope."
+    description = """
+        Assigns a public incident to a member by email or ID via `POST \
+        /v1/public-incidents/secrets/{id}/assign`. Requires the `incidents:write` scope.
+        """
 )
 @Plugin(
     examples = {

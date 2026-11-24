@@ -22,6 +22,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -110,7 +111,7 @@ class HoneytokensTest {
     }
 
     @Test
-    void triggerFiresPerEventWithHoneytokenDetails(WireMockRuntimeInfo wireMock) throws Exception {
+    void triggerFiresEventsWithHoneytokenDetails(WireMockRuntimeInfo wireMock) throws Exception {
         stubFor(get(urlPathEqualTo("/v1/honeytokens_events")).willReturn(okJson("""
             [{"id":"e1","honeytoken_id":"a1b2c3","triggered_at":"2099-01-01T10:00:00Z","status":"open","ip_address":"203.0.113.9","action":"GetCallerIdentity","gitguardian_url":"https://dashboard/e1","data":{"user_agent":"aws-cli"},"tags":[]}]
             """)));
@@ -128,10 +129,39 @@ class HoneytokensTest {
         var fired = trigger.eval(ctx.getKey(), ctx.getValue().context());
         assertThat(fired.isPresent(), is(true));
         var variables = fired.get().trigger().getVariables();
-        assertThat(((Map<?, ?>) variables.get("event")).get("ipAddress"), is("203.0.113.9"));
-        assertThat(((Map<?, ?>) variables.get("honeytoken")).get("name"), is("kestra-prod"));
-        assertThat(((Map<?, ?>) variables.get("honeytoken")).get("token"), nullValue());
+        var events = (java.util.List<?>) variables.get("events");
+        assertThat(events, hasSize(1));
+        assertThat(((Map<?, ?>) events.getFirst()).get("ipAddress"), is("203.0.113.9"));
+        var honeytoken = (Map<?, ?>) ((Map<?, ?>) variables.get("honeytokens")).get("a1b2c3");
+        assertThat(honeytoken.get("name"), is("kestra-prod"));
+        assertThat(honeytoken.get("token"), nullValue());
 
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+    }
+
+    @Test
+    void triggerCapsTheBatchOldestFirst(WireMockRuntimeInfo wireMock) throws Exception {
+        stubFor(get(urlPathEqualTo("/v1/honeytokens_events")).willReturn(okJson("""
+            [{"id":"e2","honeytoken_id":"a1b2c3","triggered_at":"2099-01-01T11:00:00Z","status":"open","tags":[]},
+             {"id":"e1","honeytoken_id":"a1b2c3","triggered_at":"2099-01-01T10:00:00Z","status":"open","tags":[]}]
+            """)));
+        stubFor(get(urlPathEqualTo("/v1/honeytokens/a1b2c3")).willReturn(okJson(HONEYTOKEN)));
+
+        var trigger = Trigger.builder()
+            .id(IdUtils.create()).type(Trigger.class.getName())
+            .apiUrl(Property.ofValue(wireMock.getHttpBaseUrl())).apiKey(Property.ofValue("k"))
+            .maxItemsPerPoll(Property.ofValue(1))
+            .interval(Duration.ofMinutes(1))
+            .build();
+        var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
+
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+
+        var first = (java.util.List<?>) trigger.eval(ctx.getKey(), ctx.getValue().context()).get().trigger().getVariables().get("events");
+        var second = (java.util.List<?>) trigger.eval(ctx.getKey(), ctx.getValue().context()).get().trigger().getVariables().get("events");
+
+        assertThat(((Map<?, ?>) first.getFirst()).get("id"), is("e1"));
+        assertThat(((Map<?, ?>) second.getFirst()).get("id"), is("e2"));
         assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
     }
 }

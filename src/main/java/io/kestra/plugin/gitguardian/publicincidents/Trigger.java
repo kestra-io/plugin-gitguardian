@@ -27,8 +27,6 @@ import lombok.experimental.SuperBuilder;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -42,8 +40,9 @@ import java.util.Set;
 @Schema(
     title = "Trigger a flow when GitGuardian Public Monitoring finds a leaked secret",
     description = """
-        Polls `GET /v1/public-incidents/secrets` at `interval` and starts one execution per new (or re-triggered) \
-        public incident, oldest first, one per poll cycle, with the incident in `trigger.incident`. Same watermark \
+        Polls `GET /v1/public-incidents/secrets` at `interval` and starts one execution per poll carrying the new (or \
+        re-triggered) public incidents, oldest first, in `trigger.incidents`, at most `maxItemsPerPoll` (default 100) \
+        at a time; the rest fire on the next polls. Same watermark \
         mechanics as the internal incidents trigger: state in the namespace KV store, baseline seeded on the first \
         poll without firing. Requires the `incidents:read` scope and a Public Monitoring subscription.
         """
@@ -58,11 +57,15 @@ import java.util.Set;
                 namespace: company.security
 
                 tasks:
-                  - id: notify
-                    type: io.kestra.plugin.slack.SlackIncomingWebhook
-                    url: "{{ secret('SLACK_WEBHOOK') }}"
-                    payload: |
-                      {"text": ":warning: Secret leaked publicly: {{ trigger.incident.incidentName }} ({{ trigger.incident.occurrencesCount }} occurrence(s)) {{ trigger.incident.gitguardianUrl }}"}
+                  - id: each_incident
+                    type: io.kestra.plugin.core.flow.ForEach
+                    values: "{{ trigger.incidents }}"
+                    tasks:
+                      - id: notify
+                        type: io.kestra.plugin.slack.SlackIncomingWebhook
+                        url: "{{ secret('SLACK_WEBHOOK') }}"
+                        payload: |
+                          {"text": ":warning: Secret leaked publicly: {{ fromJson(taskrun.value).incidentName }} ({{ fromJson(taskrun.value).occurrencesCount }} occurrence(s)) {{ fromJson(taskrun.value).gitguardianUrl }}"}
 
                 triggers:
                   - id: on_public_leak
@@ -122,31 +125,19 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
                 return Optional.empty();
             }
 
-            var pending = new ArrayList<PublicIncident>();
             var query = new LinkedHashMap<String, Object>(filters);
             query.put("ordering", "date");
             query.put("per_page", PAGE_SIZE);
             query.put("date_after", watermark.getTimestamp().minus(OVERLAP).toString());
-            client.walk(PATH, query, SCOPE, PublicIncident.class, page -> {
-                for (var incident : page) {
-                    if (incident.getDate() == null) {
-                        logger.warn("Public incident {} has no date and cannot be delivered", incident.getId());
-                    } else if (!watermark.isDelivered(incident.getDate(), String.valueOf(incident.getId()))) {
-                        pending.add(incident);
-                    }
-                }
-                return true;
-            });
-            if (pending.isEmpty()) {
+            var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
+            var undelivered = collectUndelivered(client, PATH, query, SCOPE, PublicIncident.class, watermark, cap, PublicIncident::getDate, incident -> String.valueOf(incident.getId()), logger);
+            if (undelivered.isEmpty()) {
                 return Optional.empty();
             }
-            pending.sort(Comparator.comparing(PublicIncident::getDate).thenComparing(PublicIncident::getId));
-            var next = pending.getFirst();
-            persistWatermark(kv, key, watermark.advance(next.getDate(), String.valueOf(next.getId())));
-            if (pending.size() > 1) {
-                logger.info("GitGuardian public incident {} fires now; {} more pending for the next polls", next.getId(), pending.size() - 1);
-            }
-            return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().incident(next).build()));
+
+            var batch = oldest(undelivered, cap, PublicIncident::getDate, incident -> String.valueOf(incident.getId()));
+            persistWatermark(kv, key, advance(watermark, batch, PublicIncident::getDate, incident -> String.valueOf(incident.getId())));
+            return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().incidents(batch).count(batch.size()).build()));
         }
     }
 
@@ -173,7 +164,10 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
-        @Schema(title = "The public incident that fired this execution")
-        private final PublicIncident incident;
+        @Schema(title = "New public incidents since the previous poll, oldest first", description = "At most `maxItemsPerPoll` per execution.")
+        private final java.util.List<PublicIncident> incidents;
+
+        @Schema(title = "Number of incidents in this execution")
+        private final Integer count;
     }
 }

@@ -25,7 +25,10 @@ import java.util.LinkedHashMap;
 @NoArgsConstructor
 @Schema(
     title = "List GitGuardian honeytokens",
-    description = "Lists honeytokens from `GET /v1/honeytokens` with status, type, search and tag filters, never including their values. Requires the `honeytokens:read` scope."
+    description = """
+        Lists honeytokens from `GET /v1/honeytokens` with status, type, search and tag filters, never \
+        including their values. Requires the `honeytokens:read` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -68,9 +71,6 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @Schema(title = "Ordering", description = "`created_at`, `triggered_at`, `revoked_at`, or `name`; prefix with `-` for descending.")
     @PluginProperty(group = "processing")
     private Property<String> ordering;
-
-
-
 
     @Override
     public Output run(RunContext runContext) throws Exception {

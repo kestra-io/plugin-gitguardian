@@ -25,7 +25,12 @@ import java.util.LinkedHashMap;
 @NoArgsConstructor
 @Schema(
     title = "Create a GitGuardian custom source",
-    description = "Creates a custom source via `POST /v1/sources/custom-sources`. Its `sourceUuid` is what `scan.CreateIncidents` needs to attach incidents to data GitGuardian does not monitor natively. Create it once, store the UUID in the KV store, and reuse it. The endpoint is in beta on the GitGuardian side. Requires the `sources:write` scope."
+    description = """
+        Creates a custom source via `POST /v1/sources/custom-sources`. Its `sourceUuid` is what \
+        `scan.CreateIncidents` needs to attach incidents to data GitGuardian does not monitor natively. \
+        Create it once, store the UUID in the KV store, and reuse it. The endpoint is in beta on the \
+        GitGuardian side. Requires the `sources:write` scope.
+        """
 )
 @Plugin(
     examples = {

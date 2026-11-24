@@ -15,10 +15,7 @@ import lombok.Setter;
 import java.time.Instant;
 import java.util.List;
 
-/**
- * A Public Monitoring secret incident (a secret of yours leaked on public GitHub, gists, Docker Hub, ...) as
- * returned by `GET /v1/public-incidents/secrets`. Distinct from internal incidents: IDs are not interchangeable.
- */
+/** A Public Monitoring secret incident (a secret of yours leaked on public GitHub, gists, Docker Hub, ...) as returned by `GET /v1/public-incidents/secrets`. Distinct from internal incidents: IDs are not interchangeable. */
 @Getter
 @Setter
 @NoArgsConstructor

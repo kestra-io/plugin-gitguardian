@@ -19,7 +19,10 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Reopen a GitGuardian Public Monitoring incident",
-    description = "Reopens a resolved or ignored public incident via `POST /v1/public-incidents/secrets/{id}/reopen`. Requires the `incidents:write` scope."
+    description = """
+        Reopens a resolved or ignored public incident via `POST /v1/public-incidents/secrets/{id}/reopen`. \
+        Requires the `incidents:write` scope.
+        """
 )
 @Plugin(
     examples = {

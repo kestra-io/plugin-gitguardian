@@ -79,4 +79,26 @@ class AuditLogsTest {
 
         assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
     }
+
+    @Test
+    void triggerCapsEventsPerPollAndDeliversTheRestNext(WireMockRuntimeInfo wireMock) throws Exception {
+        stubFor(get(urlPathEqualTo("/v1/audit_logs"))
+            .willReturn(okJson("[" + event(1, "2099-01-01T10:00:00Z", "incident.ignored") + "," + event(2, "2099-01-01T10:01:00Z", "incident.ignored") + "," + event(3, "2099-01-01T10:02:00Z", "incident.ignored") + "]")));
+
+        var trigger = Trigger.builder()
+            .id(IdUtils.create()).type(Trigger.class.getName())
+            .apiUrl(Property.ofValue(wireMock.getHttpBaseUrl())).apiKey(Property.ofValue("k"))
+            .maxItemsPerPoll(Property.ofValue(2))
+            .interval(Duration.ofMinutes(5))
+            .build();
+        var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
+
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+
+        var first = trigger.eval(ctx.getKey(), ctx.getValue().context());
+        assertThat(first.get().trigger().getVariables().get("count"), is(2));
+        var second = trigger.eval(ctx.getKey(), ctx.getValue().context());
+        assertThat(second.get().trigger().getVariables().get("count"), is(1));
+        assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+    }
 }

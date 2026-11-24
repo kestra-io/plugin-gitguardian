@@ -7,6 +7,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.gitguardian.AbstractGitGuardianTask;
+import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -23,7 +24,10 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Get a GitGuardian honeytoken",
-    description = "Fetches one honeytoken by ID from `GET /v1/honeytokens/{id}`, without its value. Requires the `honeytokens:read` scope."
+    description = """
+        Fetches one honeytoken by ID from `GET /v1/honeytokens/{id}`, without its value. Requires the \
+        `honeytokens:read` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -64,7 +68,7 @@ public class Get extends AbstractGitGuardianTask implements RunnableTask<Get.Out
         runContext.logger().info("Fetching GitGuardian honeytoken {}", rId);
 
         try (var client = client(runContext)) {
-            var honeytoken = client.get("/honeytokens/" + rId, null, SCOPE, Honeytoken.class);
+            var honeytoken = client.get("/honeytokens/" + GitGuardianClient.segment(rId), null, SCOPE, Honeytoken.class);
             if (honeytoken == null) {
                 throw new IllegalStateException("Empty response from the GitGuardian API for honeytoken %s.".formatted(rId));
             }

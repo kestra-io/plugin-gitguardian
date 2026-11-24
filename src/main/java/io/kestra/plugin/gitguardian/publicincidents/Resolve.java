@@ -24,7 +24,10 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Resolve a GitGuardian Public Monitoring incident",
-    description = "Resolves a public incident with one or more reasons via `POST /v1/public-incidents/secrets/{id}/resolve`. Requires the `incidents:write` scope."
+    description = """
+        Resolves a public incident with one or more reasons via `POST \
+        /v1/public-incidents/secrets/{id}/resolve`. Requires the `incidents:write` scope.
+        """
 )
 @Plugin(
     examples = {

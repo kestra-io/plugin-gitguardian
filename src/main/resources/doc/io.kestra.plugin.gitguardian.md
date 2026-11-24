@@ -22,7 +22,7 @@ Every task and trigger authenticates with an `apiKey`: a GitGuardian personal ac
 ## Typical flows
 
 1. **Pre-flight scan**: a flow renders a file or dataset, `scan.Scan` checks it, and the flow fails before publishing if a secret is present.
-2. **Incident response**: `incidents.Trigger` starts a flow per new incident that notifies a channel, assigns an owner, opens a ticket, and records a note; a rotation flow ends with `incidents.Resolve` and `secretRevoked: true`.
+2. **Incident response**: `incidents.Trigger` starts a flow per poll with the new incidents (`trigger.incidents`, capped by `maxItemsPerPoll`), which loops over them to notifies a channel, assigns an owner, opens a ticket, and records a note; a rotation flow ends with `incidents.Resolve` and `secretRevoked: true`.
 3. **Real-time alternative**: point a GitGuardian custom webhook at Kestra's webhook endpoint, use the core `Webhook` trigger, and pass `trigger.body` and `trigger.headers` to `webhooks.Receive` for signature verification and a typed `incident`.
 4. **Reporting**: `incidents.List` or `auditlogs.List` with `fetchType: STORE` export data for dashboards, SIEMs and compliance.
 5. **Non-VCS data**: `sources.CreateCustomSource` once, then `scan.CreateIncidents` on every export to record real incidents for data GitGuardian does not monitor natively.

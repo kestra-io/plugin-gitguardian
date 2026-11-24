@@ -25,7 +25,10 @@ import java.util.LinkedHashMap;
 @NoArgsConstructor
 @Schema(
     title = "List GitGuardian monitored sources",
-    description = "Lists the sources (repositories, projects, buckets, channels) known to GitGuardian from `GET /v1/sources`, with server-side filters and cursor pagination. Requires the `sources:read` scope."
+    description = """
+        Lists the sources (repositories, projects, buckets, channels) known to GitGuardian from `GET \
+        /v1/sources`, with server-side filters and cursor pagination. Requires the `sources:read` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -86,9 +89,6 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @Schema(title = "Ordering", description = "`last_scan_date` or `-last_scan_date`.")
     @PluginProperty(group = "processing")
     private Property<String> ordering;
-
-
-
 
     @Override
     public Output run(RunContext runContext) throws Exception {

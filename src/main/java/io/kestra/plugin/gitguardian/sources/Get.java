@@ -23,7 +23,10 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Get a GitGuardian source",
-    description = "Fetches one monitored source by ID from `GET /v1/sources/{id}`, including its `lastScan` status. Requires the `sources:read` scope."
+    description = """
+        Fetches one monitored source by ID from `GET /v1/sources/{id}`, including its `lastScan` status. \
+        Requires the `sources:read` scope.
+        """
 )
 @Plugin(
     examples = {

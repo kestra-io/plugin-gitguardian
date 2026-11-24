@@ -10,6 +10,7 @@ import io.kestra.core.models.triggers.TriggerEvaluationResult;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.plugin.gitguardian.AbstractGitGuardianTrigger;
+import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -21,8 +22,9 @@ import lombok.experimental.SuperBuilder;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -34,9 +36,9 @@ import java.util.Set;
 @Schema(
     title = "Trigger a flow when a GitGuardian honeytoken is used",
     description = """
-        Polls `GET /v1/honeytokens_events` at `interval` and starts one execution per new event, oldest first, one \
-        per poll cycle, with the event in `trigger.event` and the honeytoken it belongs to in `trigger.honeytoken` \
-        (without its value). A honeytoken firing means someone used a decoy credential: treat it as an active \
+        Polls `GET /v1/honeytokens_events` at `interval` and starts one execution per poll carrying the new events, \
+        oldest first, in `trigger.events` (at most `maxItemsPerPoll`, default 100; the rest fire on the next polls), \
+        and the honeytokens they belong to in `trigger.honeytokens`, keyed by honeytoken ID (without their value). A honeytoken firing means someone used a decoy credential: treat it as an active \
         intrusion signal. The watermark is kept in the flow namespace KV store and seeded at the current time on the \
         first poll. Requires the `honeytokens:read` scope.
         """
@@ -51,20 +53,24 @@ import java.util.Set;
                 namespace: company.security
 
                 tasks:
-                  - id: page
-                    type: io.kestra.plugin.pagerduty.Alert
-                    integrationKey: "{{ secret('PAGERDUTY_KEY') }}"
-                    payloadSummary: "Honeytoken {{ trigger.honeytoken.name }} used from {{ trigger.event.ipAddress }} ({{ trigger.event.action }})"
-                    payloadSeverity: CRITICAL
+                  - id: each_event
+                    type: io.kestra.plugin.core.flow.ForEach
+                    values: "{{ trigger.events }}"
+                    tasks:
+                      - id: page
+                        type: io.kestra.plugin.pagerduty.Alert
+                        integrationKey: "{{ secret('PAGERDUTY_KEY') }}"
+                        payloadSummary: "Honeytoken {{ trigger.honeytokens[fromJson(taskrun.value).honeytokenId].name }} used from {{ fromJson(taskrun.value).ipAddress }} ({{ fromJson(taskrun.value).action }})"
+                        payloadSeverity: CRITICAL
 
-                  - id: ticket
-                    type: io.kestra.plugin.jira.issues.Create
-                    baseUrl: https://company.atlassian.net
-                    username: "{{ secret('JIRA_USER') }}"
-                    password: "{{ secret('JIRA_TOKEN') }}"
-                    projectKey: SEC
-                    summary: "Honeytoken triggered: {{ trigger.honeytoken.name }}"
-                    description: "{{ trigger.honeytoken.description }} - {{ trigger.event.gitguardianUrl }}"
+                      - id: ticket
+                        type: io.kestra.plugin.jira.issues.Create
+                        baseUrl: https://company.atlassian.net
+                        username: "{{ secret('JIRA_USER') }}"
+                        password: "{{ secret('JIRA_TOKEN') }}"
+                        projectKey: SEC
+                        summary: "Honeytoken triggered: {{ trigger.honeytokens[fromJson(taskrun.value).honeytokenId].name }}"
+                        description: "{{ fromJson(taskrun.value).gitguardianUrl }}"
 
                 triggers:
                   - id: on_honeytoken_event
@@ -125,31 +131,34 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
             if (pending.isEmpty()) {
                 return Optional.empty();
             }
-            pending.sort(Comparator.comparing(HoneytokenEvent::getTriggeredAt).thenComparing(HoneytokenEvent::getId));
-            var next = pending.getFirst();
 
-            Honeytoken honeytoken = null;
-            try {
-                honeytoken = client.get("/honeytokens/" + next.getHoneytokenId(), java.util.Map.of("show_token", false), SCOPE, Honeytoken.class);
-            } catch (Exception e) {
-                runContext.logger().warn("Honeytoken event {} fires without honeytoken details: {}", next.getId(), e.getMessage());
+            var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
+            var batch = oldest(pending, cap, HoneytokenEvent::getTriggeredAt, HoneytokenEvent::getId);
+
+            var honeytokens = new LinkedHashMap<String, Honeytoken>();
+            for (var honeytokenId : batch.stream().map(HoneytokenEvent::getHoneytokenId).filter(Objects::nonNull).distinct().toList()) {
+                try {
+                    honeytokens.put(honeytokenId, client.get("/honeytokens/" + GitGuardianClient.segment(honeytokenId), Map.of("show_token", false), SCOPE, Honeytoken.class));
+                } catch (Exception e) {
+                    runContext.logger().warn("Honeytoken {} fires without honeytoken details: {}", honeytokenId, e.getMessage());
+                }
             }
 
-            persistWatermark(kv, key, watermark.advance(next.getTriggeredAt(), next.getId()));
-            if (pending.size() > 1) {
-                runContext.logger().info("Honeytoken event {} fires now; {} more pending for the next polls", next.getId(), pending.size() - 1);
-            }
-            return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().event(next).honeytoken(honeytoken).build()));
+            persistWatermark(kv, key, advance(watermark, batch, HoneytokenEvent::getTriggeredAt, HoneytokenEvent::getId));
+            return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().events(batch).count(batch.size()).honeytokens(honeytokens).build()));
         }
     }
 
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
-        @Schema(title = "The honeytoken event that fired this execution")
-        private final HoneytokenEvent event;
+        @Schema(title = "New honeytoken events since the previous poll, oldest first", description = "At most `maxItemsPerPoll` per execution.")
+        private final java.util.List<HoneytokenEvent> events;
 
-        @Schema(title = "The honeytoken that was used, without its value", description = "Null if it could not be fetched.")
-        private final Honeytoken honeytoken;
+        @Schema(title = "Number of events in this execution")
+        private final Integer count;
+
+        @Schema(title = "The honeytokens that were used, keyed by honeytoken ID, without their value", description = "A honeytoken that could not be fetched is missing from the map.")
+        private final Map<String, Honeytoken> honeytokens;
     }
 }

@@ -7,6 +7,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.gitguardian.AbstractGitGuardianTask;
+import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -23,7 +24,11 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Reset a GitGuardian honeytoken",
-    description = "Resets a triggered honeytoken to active via `POST /v1/honeytokens/{id}/reset` and closes its events, once the investigation is over and the decoy should keep watching. Use `Revoke` instead when the honeytoken is compromised beyond reuse. Requires the `honeytokens:write` scope."
+    description = """
+        Resets a triggered honeytoken to active via `POST /v1/honeytokens/{id}/reset` and closes its events, \
+        once the investigation is over and the decoy should keep watching. Use `Revoke` instead when the \
+        honeytoken is compromised beyond reuse. Requires the `honeytokens:write` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -63,7 +68,7 @@ public class Reset extends AbstractGitGuardianTask implements RunnableTask<Reset
         runContext.logger().info("Resetting GitGuardian honeytoken {}", rId);
 
         try (var client = client(runContext)) {
-            var honeytoken = client.post("/honeytokens/" + rId + "/reset", null, SCOPE, Honeytoken.class);
+            var honeytoken = client.post("/honeytokens/" + GitGuardianClient.segment(rId) + "/reset", null, SCOPE, Honeytoken.class);
             if (honeytoken == null) {
                 throw new IllegalStateException("Empty response from the GitGuardian API when resetting honeytoken %s.".formatted(rId));
             }

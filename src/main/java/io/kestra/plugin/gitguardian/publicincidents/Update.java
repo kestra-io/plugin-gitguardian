@@ -26,7 +26,10 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Update a GitGuardian Public Monitoring incident",
-    description = "Sets the severity (`POST .../set_severity`) and/or replaces the custom tags (`POST .../set_custom_tags`) of a public incident. Requires the `incidents:write` scope."
+    description = """
+        Sets the severity (`POST .../set_severity`) and/or replaces the custom tags (`POST \
+        .../set_custom_tags`) of a public incident. Requires the `incidents:write` scope.
+        """
 )
 @Plugin(
     examples = {

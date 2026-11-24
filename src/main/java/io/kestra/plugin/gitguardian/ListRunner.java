@@ -16,11 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Shared implementation of the `fetchType` contract for every list task: walks a cursor-paginated
- * endpoint, caps at {@code maxResults}, and either returns rows, the first row, a count, or an Ion
- * file in internal storage.
- */
+/** Shared implementation of the `fetchType` contract for every list task: walks a cursor-paginated endpoint, caps at {@code maxResults}, and either returns rows, the first row, a count, or an Ion file in internal storage. */
 public final class ListRunner {
     private ListRunner() {
     }

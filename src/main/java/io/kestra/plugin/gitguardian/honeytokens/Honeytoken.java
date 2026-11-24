@@ -11,10 +11,7 @@ import lombok.Setter;
 import java.time.Instant;
 import java.util.List;
 
-/**
- * A honeytoken as returned by the `/v1/honeytokens` endpoints. The `token` object (the decoy credential
- * itself) is deliberately not mapped here; `Create` returns it once, encrypted, in its own output.
- */
+/** A honeytoken without its decoy credential, which only `Create` returns, encrypted. */
 @Getter
 @Setter
 @NoArgsConstructor

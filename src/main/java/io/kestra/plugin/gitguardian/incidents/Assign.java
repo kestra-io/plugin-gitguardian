@@ -24,7 +24,10 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Assign a GitGuardian secret incident",
-    description = "Assigns a secret incident to a workspace member by email or member ID via `POST /v1/incidents/secrets/{id}/assign`. Requires the `incidents:write` scope."
+    description = """
+        Assigns a secret incident to a workspace member by email or member ID via `POST \
+        /v1/incidents/secrets/{id}/assign`. Requires the `incidents:write` scope.
+        """
 )
 @Plugin(
     examples = {

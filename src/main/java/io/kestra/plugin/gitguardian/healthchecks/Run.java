@@ -9,6 +9,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.gitguardian.AbstractGitGuardianTask;
+import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -26,7 +27,11 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Run a GitGuardian integration health check",
-    description = "Enqueues a health check for one integration instance via `POST /v1/health-checks/{type}/{instanceId}/trigger`. The check runs asynchronously; poll `List` or open `resultUrl` for the outcome. Requires the `health_checks:write` scope."
+    description = """
+        Enqueues a health check for one integration instance via `POST \
+        /v1/health-checks/{type}/{instanceId}/trigger`. The check runs asynchronously; poll `List` or open \
+        `resultUrl` for the outcome. Requires the `health_checks:write` scope.
+        """
 )
 @Plugin(
     examples = {
@@ -79,7 +84,7 @@ public class Run extends AbstractGitGuardianTask implements RunnableTask<Run.Out
         runContext.logger().info("Running GitGuardian health check for {} instance {}", rType, rInstanceId);
 
         try (var client = client(runContext)) {
-            var response = client.post("/health-checks/" + rType + "/" + rInstanceId + "/trigger", null, SCOPE, Response.class);
+            var response = client.post("/health-checks/" + GitGuardianClient.segment(rType) + "/" + rInstanceId + "/trigger", null, SCOPE, Response.class);
             return Output.builder()
                 .detail(response != null ? response.getDetail() : null)
                 .resultUrl(response != null ? response.getResultUrl() : null)

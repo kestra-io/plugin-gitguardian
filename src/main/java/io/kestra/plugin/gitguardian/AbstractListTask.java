@@ -24,7 +24,16 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 public abstract class AbstractListTask extends AbstractGitGuardianTask {
-    @Schema(title = "Maximum number of items to return", description = "Stops paginating once reached. Unlimited when omitted.")
+    private static final int DEFAULT_FETCH_MAX_RESULTS = 1000;
+
+    @Schema(
+        title = "Maximum number of items to return",
+        description = """
+            Stops paginating once reached. When omitted, `FETCH` returns at most `1000` items to keep the output small \
+            (a warning is logged if that cap truncates the result), while `STORE` and `NONE` are unlimited. \
+            Set it explicitly to raise or lower the cap, or use `STORE` for large result sets.\
+            """
+    )
     @PluginProperty(group = "processing")
     protected Property<@Min(1) Integer> maxResults;
 
@@ -48,7 +57,15 @@ public abstract class AbstractListTask extends AbstractGitGuardianTask {
         query.values().removeIf(value -> value == null);
         var rFetchType = runContext.render(fetchType).as(FetchType.class).orElse(FetchType.FETCH);
         var rMaxResults = runContext.render(maxResults).as(Integer.class).orElse(null);
+        var capped = rFetchType == FetchType.FETCH && rMaxResults == null;
+        if (capped) {
+            rMaxResults = DEFAULT_FETCH_MAX_RESULTS;
+        }
         runContext.logger().info("Listing GitGuardian {} with filters {}", path, query);
-        return ListRunner.run(runContext, client, path, query, scope, itemType, rFetchType, rMaxResults);
+        var result = ListRunner.run(runContext, client, path, query, scope, itemType, rFetchType, rMaxResults);
+        if (capped && result.size() >= DEFAULT_FETCH_MAX_RESULTS) {
+            runContext.logger().warn("FETCH returned the default maximum of {} items and more may exist. Set maxResults or use fetchType STORE to get everything.", DEFAULT_FETCH_MAX_RESULTS);
+        }
+        return result;
     }
 }

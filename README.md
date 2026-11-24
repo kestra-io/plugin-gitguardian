@@ -73,30 +73,34 @@ Outputs: `policyBreakCount`, `documentCount`, per-document `results` (detector, 
 
 Two ways to start a flow from an incident, use either or both:
 
-**Polling trigger** (`incidents.Trigger`): polls `GET /v1/incidents/secrets` and starts one execution per new incident, oldest first, with server-side filters. State lives in the namespace KV store, so restarts never re-fire or skip an incident.
+**Polling trigger** (`incidents.Trigger`): polls `GET /v1/incidents/secrets` and starts one execution per poll carrying the new incidents (`trigger.incidents`, oldest first, at most `maxItemsPerPoll`, default 100), with server-side filters. State lives in the namespace KV store, so restarts never re-fire or skip an incident.
 
 ```yaml
 id: incident_response
 namespace: company.security
 
 tasks:
-  - id: notify
-    type: io.kestra.plugin.slack.SlackIncomingWebhook
-    url: "{{ secret('SLACK_WEBHOOK') }}"
-    payload: |
-      {"text": ":rotating_light: {{ trigger.incident.incidentName }} ({{ trigger.incident.severity }}) {{ trigger.incident.gitguardianUrl }}"}
+  - id: each_incident
+    type: io.kestra.plugin.core.flow.ForEach
+    values: "{{ trigger.incidents }}"
+    tasks:
+      - id: notify
+        type: io.kestra.plugin.slack.SlackIncomingWebhook
+        url: "{{ secret('SLACK_WEBHOOK') }}"
+        payload: |
+          {"text": ":rotating_light: {{ fromJson(taskrun.value).incidentName }} ({{ fromJson(taskrun.value).severity }}) {{ fromJson(taskrun.value).gitguardianUrl }}"}
 
-  - id: assign
-    type: io.kestra.plugin.gitguardian.incidents.Assign
-    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-    incidentId: "{{ trigger.incident.id }}"
-    assigneeEmail: security-oncall@company.com
+      - id: assign
+        type: io.kestra.plugin.gitguardian.incidents.Assign
+        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+        incidentId: "{{ fromJson(taskrun.value).id }}"
+        assigneeEmail: security-oncall@company.com
 
-  - id: note
-    type: io.kestra.plugin.gitguardian.incidents.AddNote
-    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-    incidentId: "{{ trigger.incident.id }}"
-    comment: "Triage started by Kestra execution {{ execution.id }}"
+      - id: note
+        type: io.kestra.plugin.gitguardian.incidents.AddNote
+        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+        incidentId: "{{ fromJson(taskrun.value).id }}"
+        comment: "Triage started by Kestra execution {{ execution.id }}"
 
 triggers:
   - id: on_incident
@@ -169,7 +173,7 @@ tasks:
 
 ### 4. Honeytokens as intrusion tripwires
 
-`honeytokens.Create` mints a decoy AWS credential from a deployment flow and returns it encrypted (`{{ decrypt(outputs.create.encryptedToken) }}`) so it can be placed in a config file or repository without ever appearing in clear in Kestra. `honeytokens.Trigger` starts a response flow the moment the decoy is used, with the source IP, action, and honeytoken description. Close the loop with `honeytokens.Reset` once the investigation is over, or `honeytokens.Revoke` if the decoy is burned. Honeytoken webhook events (`honeytoken_triggered`, `new_honeytoken_event`) are also typed by `webhooks.Receive`.
+`honeytokens.Create` mints a decoy AWS credential from a deployment flow and returns it encrypted (`{{ decrypt(outputs.create.encryptedToken) }}`) so it can be placed in a config file or repository without ever appearing in clear in Kestra. `honeytokens.Trigger` starts a response flow the moment the decoy is used, with the source IP, action, and honeytoken description (`trigger.events` and `trigger.honeytokens`, keyed by honeytoken ID). Close the loop with `honeytokens.Reset` once the investigation is over, or `honeytokens.Revoke` if the decoy is burned. Honeytoken webhook events (`honeytoken_triggered`, `new_honeytoken_event`) are also typed by `webhooks.Receive`.
 
 ### 5. Audit logs to your SIEM
 
@@ -188,14 +192,14 @@ tasks:
 | Component | Type | Scope | Description |
 |---|---|---|---|
 | `scan.Scan` | task | `scan` | Scan inline content and/or internal storage files (`/v1/scan`, `/v1/multiscan`, batches of 20, 1 MB per document). |
-| `incidents.Trigger` | trigger | `incidents:read` | Start a flow per new (or re-triggered) secret incident, with status / severity / validity / detector / tag / risk score filters. |
+| `incidents.Trigger` | trigger | `incidents:read` | Start a flow per poll with the new (or re-triggered) secret incidents, with status / severity / validity / detector / tag / risk score filters. |
 | `incidents.List` | task | `incidents:read` | List incidents with server-side filters, cursor pagination, `maxResults`, and `fetchType` FETCH / FETCH_ONE / STORE / NONE. |
 | `incidents.Get` | task | `incidents:read` | Fetch one incident by ID. |
 | `incidents.Assign` | task | `incidents:write` | Assign to a member by email or ID. |
 | `incidents.Update` | task | `incidents:write` | Set severity and/or custom tags. |
 | `incidents.AddNote` | task | `incidents:write` | Add a note. |
 | `incidents.Ignore` / `Reopen` / `Resolve` | task | `incidents:write` | Change the incident status. |
-| `publicincidents.Trigger` | trigger | `incidents:read` | Start a flow per new Public Monitoring incident. |
+| `publicincidents.Trigger` | trigger | `incidents:read` | Start a flow per poll with the new Public Monitoring incidents. |
 | `publicincidents.List` / `Get` | task | `incidents:read` | Read Public Monitoring incidents with the same filters plus `declarativeSecretStatus`. |
 | `publicincidents.Assign` / `Update` / `AddNote` / `Ignore` / `Reopen` / `Resolve` | task | `incidents:write` | Triage Public Monitoring incidents. |
 | `webhooks.Receive` | task | none | Verify (HMAC + timestamp) and parse a GitGuardian custom webhook event received by the core Webhook trigger. |
@@ -206,9 +210,9 @@ tasks:
 | `honeytokens.Create` | task | `honeytokens:write` | Create a honeytoken, value returned encrypted. Needs `kestra.encryption.secret-key`. |
 | `honeytokens.Get` / `List` | task | `honeytokens:read` | Read honeytokens, never their values. |
 | `honeytokens.Reset` / `Revoke` | task | `honeytokens:write` | Reset a triggered honeytoken after investigation, or revoke it for good. |
-| `honeytokens.Trigger` | trigger | `honeytokens:read` | Start a flow per honeytoken event, with the honeytoken details. |
+| `honeytokens.Trigger` | trigger | `honeytokens:read` | Start a flow per poll with the new honeytoken events and their honeytoken details. |
 | `auditlogs.List` | task | `audit_logs:read` | List or export audit log entries with filters. |
-| `auditlogs.Trigger` | trigger | `audit_logs:read` | Start a flow per poll with all new events, optional `eventNames` filter. |
+| `auditlogs.Trigger` | trigger | `audit_logs:read` | Start a flow per poll with the new events (capped by `maxItemsPerPoll`), optional `eventNames` filter. |
 | `healthchecks.List` | task | `health_checks:read` | Latest health check per integration instance. |
 | `healthchecks.Run` | task | `health_checks:write` | Re-run the health check of one integration instance. |
 | `healthchecks.Trigger` | trigger | `health_checks:read` | Start a flow when integrations enter `FAIL` (or other statuses), once per streak. |

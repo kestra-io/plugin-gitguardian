@@ -19,7 +19,10 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Get a GitGuardian Public Monitoring incident",
-    description = "Fetches one public incident by ID from `GET /v1/public-incidents/secrets/{id}`. Requires the `incidents:read` scope."
+    description = """
+        Fetches one public incident by ID from `GET /v1/public-incidents/secrets/{id}`. Requires the \
+        `incidents:read` scope.
+        """
 )
 @Plugin(
     examples = {
