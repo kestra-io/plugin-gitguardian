@@ -20,7 +20,6 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -127,14 +126,8 @@ public class CreateIncidents extends AbstractGitGuardianTask implements Runnable
             documents.add(document(runContext.render(filename).as(String.class).orElse("content"), rContent, rLocationUrl, rAuthorEmail));
         }
         for (var file : runContext.render(files).asList(String.class)) {
-            var uri = URI.create(file);
-            byte[] bytes;
-            try (var inputStream = runContext.storage().getFile(uri)) {
-                bytes = inputStream.readAllBytes();
-            }
-            var path = uri.getPath();
-            var name = path == null || path.isBlank() ? "content" : path.substring(path.lastIndexOf('/') + 1);
-            documents.add(document(name.isBlank() ? "content" : name, new String(bytes, StandardCharsets.UTF_8), rLocationUrl, rAuthorEmail));
+            var loaded = ScanFiles.read(runContext, file, MAX_BATCH_BYTES);
+            documents.add(document(loaded.name(), loaded.body(), rLocationUrl, rAuthorEmail));
         }
         if (documents.isEmpty()) {
             throw new IllegalArgumentException("Nothing to scan: set content, files, or both.");

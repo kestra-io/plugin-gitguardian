@@ -1,6 +1,5 @@
 package io.kestra.plugin.gitguardian.scan;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
@@ -9,8 +8,6 @@ import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.serializers.FileSerde;
-import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.gitguardian.AbstractGitGuardianTask;
 import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -20,11 +17,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import reactor.core.publisher.Flux;
 
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -59,10 +52,6 @@ import java.util.Map;
                 namespace: company.security
 
                 tasks:
-                  - id: render_config
-                    type: io.kestra.plugin.core.log.Log
-                    message: "Rendering config"
-
                   - id: scan
                     type: io.kestra.plugin.gitguardian.scan.Scan
                     apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
@@ -180,7 +169,6 @@ public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.O
             .documentCount(results.size())
             .policyBreakCount(policyBreakCount)
             .results(results)
-            .uri(store(runContext, results))
             .build();
     }
 
@@ -194,12 +182,8 @@ public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.O
         }
 
         for (var file : runContext.render(files).asList(String.class)) {
-            var uri = URI.create(file);
-            byte[] bytes;
-            try (var inputStream = runContext.storage().getFile(uri)) {
-                bytes = inputStream.readAllBytes();
-            }
-            documents.add(document(fileName(uri), new String(bytes, StandardCharsets.UTF_8)));
+            var loaded = ScanFiles.read(runContext, file, MAX_DOCUMENT_BYTES);
+            documents.add(document(loaded.name(), loaded.body()));
         }
         return documents;
     }
@@ -215,30 +199,12 @@ public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.O
         return document;
     }
 
-    private static String fileName(URI uri) {
-        var path = uri.getPath();
-        if (path == null || path.isBlank()) {
-            return "content";
-        }
-        var name = path.substring(path.lastIndexOf('/') + 1);
-        return name.isBlank() ? "content" : name;
-    }
-
     private static ScanResult named(ScanResult result, Map<String, String> document) {
         if (result == null) {
             throw new IllegalStateException("Empty response from the GitGuardian scan API for document '%s'.".formatted(document.get("filename")));
         }
         result.setFilename(document.get("filename"));
         return result;
-    }
-
-    private static URI store(RunContext runContext, List<ScanResult> results) throws Exception {
-        var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
-        try (var writer = new BufferedWriter(new FileWriter(tempFile), FileSerde.BUFFER_SIZE);
-             var sequenceWriter = FileSerde.createSequenceWriter(JacksonMapper.ofIon(), writer, new TypeReference<ScanResult>() {})) {
-            FileSerde.writeAll(Flux.fromIterable(results), sequenceWriter).block();
-        }
-        return runContext.storage().putFile(tempFile);
     }
 
     @Builder
@@ -252,8 +218,5 @@ public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.O
 
         @Schema(title = "Per-document scan results", description = "Includes detector, validity and match positions. Never includes the matched secret strings.")
         private final List<ScanResult> results;
-
-        @Schema(title = "Internal storage URI of the results as an Amazon Ion file, one row per document")
-        private final URI uri;
     }
 }

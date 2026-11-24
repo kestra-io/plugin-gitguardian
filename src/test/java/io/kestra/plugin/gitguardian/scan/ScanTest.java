@@ -6,16 +6,12 @@ import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
-import io.kestra.core.serializers.FileSerde;
 import io.kestra.plugin.gitguardian.GitGuardianApiException;
 import io.kestra.plugin.gitguardian.incidents.Validity;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 
@@ -30,9 +26,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.verify;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -67,7 +61,6 @@ class ScanTest {
         assertThat(output.getDocumentCount(), is(1));
         assertThat(output.getPolicyBreakCount(), is(0));
         assertThat(output.getResults().getFirst().getFilename(), is(".env"));
-        assertThat(output.getUri(), notNullValue());
     }
 
     @Test
@@ -124,9 +117,19 @@ class ScanTest {
         assertThat(output.getResults().get(1).getFilename(), is("config.yml"));
         assertThat(output.getResults().get(1).getPolicyBreakCount(), is(1));
 
-        try (var reader = new BufferedReader(new InputStreamReader(runContext.storage().getFile(output.getUri())))) {
-            assertThat(reader.lines().toList(), hasSize(2));
-        }
+        verify(0, postRequestedFor(urlPathEqualTo("/v1/scan")));
+    }
+
+    @Test
+    void rejectsStoredFilesOverOneMegabyte(WireMockRuntimeInfo wireMock) throws Exception {
+        var runContext = runContextFactory.of(Map.of());
+        var file = runContext.workingDir().createFile("big.txt", "x".repeat(Scan.MAX_DOCUMENT_BYTES + 1).getBytes(StandardCharsets.UTF_8)).toFile();
+        var uri = runContext.storage().putFile(file, "big.txt");
+        var task = task(wireMock).files(Property.ofValue(List.of(uri.toString()))).build();
+
+        var exception = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+
+        assertThat(exception.getMessage(), containsString("big.txt"));
         verify(0, postRequestedFor(urlPathEqualTo("/v1/scan")));
     }
 

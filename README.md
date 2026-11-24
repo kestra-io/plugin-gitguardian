@@ -67,7 +67,7 @@ tasks:
     message: "Clean, publishing {{ outputs.render.uri }}"
 ```
 
-Outputs: `policyBreakCount`, `documentCount`, per-document `results` (detector, validity, known incident URL, match positions) and an Ion file `uri`. Matched secret strings are never written to outputs or logs.
+Outputs: `policyBreakCount`, `documentCount`, per-document `results` (detector, validity, known incident URL, match positions). Matched secret strings are never written to outputs or logs.
 
 ### 2. Orchestrate the response when GitGuardian detects a secret
 
