@@ -37,6 +37,7 @@ import java.util.Set;
         Polls `GET /v1/audit_logs` at `interval` and starts one execution per poll carrying the new events since \
         the last poll (`trigger.events`), so a burst of activity produces one execution, not one per event. A poll \
         carries at most `maxItemsPerPoll` events (default 100) to keep the output small; the rest fire on the next polls. \
+        The API cannot sort audit logs, so each poll reads every event since the watermark, then delivers the oldest ones. \
         Optionally restrict to `eventNames`. The watermark (newest delivered date plus the IDs sharing it) is kept \
         in the flow namespace KV store; on the first poll it is seeded at the current time and nothing fires. \
         Requires the `audit_logs:read` scope.
@@ -55,8 +56,10 @@ import java.util.Set;
                   - id: alert
                     type: io.kestra.plugin.slack.SlackIncomingWebhook
                     url: "{{ secret('SLACK_WEBHOOK') }}"
-                    payload: |
-                      {"text": "GitGuardian: {{ trigger.count }} sensitive action(s): {{ trigger.events | jq('[.[] | .eventName + \\" by \\" + (.memberEmail // .apiTokenId)]') | first }}"}
+                    messageText: |
+                      GitGuardian: {{ trigger.count }} sensitive action(s)
+                      {% for event in trigger.events %}- {{ event.eventName }} by {{ event.memberEmail ?? event.apiTokenId }}
+                      {% endfor %}
 
                 triggers:
                   - id: on_audit_event
@@ -103,7 +106,8 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
                 query.put("per_page", PAGE_SIZE);
                 query.put("date_after", watermark.getTimestamp().minus(OVERLAP).toString());
                 query.values().removeIf(value -> value == null);
-                undelivered.addAll(collectUndelivered(client, "/audit_logs", query, SCOPE, AuditLog.class, watermark, cap, AuditLog::getDate, event -> String.valueOf(event.getId()), runContext.logger()));
+                // The endpoint has no ordering parameter, so the cap cannot stop the walk: it may list newest first.
+                undelivered.addAll(collectUndelivered(client, "/audit_logs", query, SCOPE, AuditLog.class, watermark, Integer.MAX_VALUE, AuditLog::getDate, event -> String.valueOf(event.getId()), runContext.logger()));
             }
         }
 

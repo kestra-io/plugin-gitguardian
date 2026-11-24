@@ -40,13 +40,14 @@ import java.util.Set;
         oldest first, in `trigger.events` (at most `maxItemsPerPoll`, default 100; the rest fire on the next polls), \
         and the honeytokens they belong to in `trigger.honeytokens`, keyed by honeytoken ID (without their value). A honeytoken firing means someone used a decoy credential: treat it as an active \
         intrusion signal. The watermark is kept in the flow namespace KV store and seeded at the current time on the \
-        first poll. Requires the `honeytokens:read` scope.
+        first poll. The events endpoint has no date filter and can only be read newest first, so each poll reads the \
+        events back to the watermark, then delivers the oldest ones. Requires the `honeytokens:read` scope.
         """
 )
 @Plugin(
     examples = {
         @Example(
-            title = "Page security and open a ticket when a honeytoken fires",
+            title = "Alert security and open a ticket when a honeytoken fires",
             full = true,
             code = """
                 id: gitguardian_honeytoken_alert
@@ -54,14 +55,13 @@ import java.util.Set;
 
                 tasks:
                   - id: each_event
-                    type: io.kestra.plugin.core.flow.ForEach
+                    type: io.kestra.plugin.core.flow.Loop
                     values: "{{ trigger.events }}"
                     tasks:
-                      - id: page
-                        type: io.kestra.plugin.pagerduty.Alert
-                        integrationKey: "{{ secret('PAGERDUTY_KEY') }}"
-                        payloadSummary: "Honeytoken {{ trigger.honeytokens[fromJson(taskrun.value).honeytokenId].name }} used from {{ fromJson(taskrun.value).ipAddress }} ({{ fromJson(taskrun.value).action }})"
-                        payloadSeverity: CRITICAL
+                      - id: alert
+                        type: io.kestra.plugin.slack.SlackIncomingWebhook
+                        url: "{{ secret('SLACK_WEBHOOK') }}"
+                        messageText: ":rotating_light: Honeytoken {{ trigger.honeytokens[fromJson(item.value).honeytokenId].name ?? fromJson(item.value).honeytokenId }} used from {{ fromJson(item.value).ipAddress }} ({{ fromJson(item.value).action }})"
 
                       - id: ticket
                         type: io.kestra.plugin.jira.issues.Create
@@ -69,8 +69,8 @@ import java.util.Set;
                         username: "{{ secret('JIRA_USER') }}"
                         password: "{{ secret('JIRA_TOKEN') }}"
                         projectKey: SEC
-                        summary: "Honeytoken triggered: {{ trigger.honeytokens[fromJson(taskrun.value).honeytokenId].name }}"
-                        description: "{{ fromJson(taskrun.value).gitguardianUrl }}"
+                        summary: "Honeytoken triggered: {{ trigger.honeytokens[fromJson(item.value).honeytokenId].name ?? fromJson(item.value).honeytokenId }}"
+                        description: "{{ fromJson(item.value).gitguardianUrl }}"
 
                 triggers:
                   - id: on_honeytoken_event
