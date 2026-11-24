@@ -63,8 +63,8 @@ public final class GitGuardianClient implements Closeable {
     /** Streams every page of a list endpoint to {@code consumer} and returns the number of items seen. */
     public <T> long walk(String path, Map<String, Object> query, String scope, Class<T> itemType, PageConsumer<T> consumer) throws Exception {
         String cursor = null;
-        long total = 0;
-        for (int pages = 0; ; pages++) {
+        var total = 0L;
+        for (var pages = 0; ; pages++) {
             if (pages >= MAX_PAGES) {
                 throw new GitGuardianApiException("GitGuardian pagination exceeded %d pages on %s. Narrow the query with filters.".formatted(MAX_PAGES, path));
             }
