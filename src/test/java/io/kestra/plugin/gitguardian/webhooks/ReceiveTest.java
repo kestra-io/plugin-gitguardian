@@ -165,4 +165,40 @@ class ReceiveTest {
         assertThat(output.getWebhookName(), is("kestra"));
         assertThat(output.getPayload().get("source"), is("GitGuardian"));
     }
+
+    private Receive.Output verifyWithHeaderTimestamp(String headerTimestamp) throws Exception {
+        var payload = pythonPayload(Instant.now().toString());
+        return Receive.builder()
+            .id(IdUtils.create()).type(Receive.class.getName())
+            .body(Property.ofValue(parsed(payload)))
+            .headers(Property.ofValue(Map.of("Gitguardian-Signature", List.of(sign(headerTimestamp, payload)), "Timestamp", List.of(headerTimestamp))))
+            .signatureToken(Property.ofValue(TOKEN))
+            .build()
+            .run(runContextFactory.of(Map.of()));
+    }
+
+    @Test
+    void acceptsEpochSecondsTimestampHeader() throws Exception {
+        assertThat(verifyWithHeaderTimestamp(String.valueOf(Instant.now().getEpochSecond())).getVerified(), is(true));
+    }
+
+    @Test
+    void acceptsFractionalEpochSecondsTimestampHeader() throws Exception {
+        var now = Instant.now();
+        assertThat(verifyWithHeaderTimestamp(now.getEpochSecond() + "." + String.format("%03d", now.getNano() / 1_000_000)).getVerified(), is(true));
+    }
+
+    @Test
+    void acceptsEpochMillisecondsTimestampHeader() throws Exception {
+        assertThat(verifyWithHeaderTimestamp(String.valueOf(Instant.now().toEpochMilli())).getVerified(), is(true));
+    }
+
+    @Test
+    void rejectsStaleEpochTimestampHeader() throws Exception {
+        var stale = String.valueOf(Instant.now().minus(Duration.ofHours(1)).getEpochSecond());
+
+        var exception = assertThrows(IllegalStateException.class, () -> verifyWithHeaderTimestamp(stale));
+
+        assertThat(exception.getMessage(), containsString("maxClockSkew"));
+    }
 }

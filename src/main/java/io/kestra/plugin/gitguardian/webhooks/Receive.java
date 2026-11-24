@@ -22,14 +22,17 @@ import lombok.experimental.SuperBuilder;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @SuperBuilder
 @ToString
@@ -88,6 +91,8 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
     private static final ObjectMapper MAPPER = JacksonMapper.ofJson();
     private static final List<String> SIGNATURE_HEADERS = List.of("gitguardian-signature", "x-gitguardian-signature");
     private static final String TIMESTAMP_HEADER = "timestamp";
+    private static final Pattern EPOCH = Pattern.compile("-?\\d+(\\.\\d+)?");
+    private static final BigDecimal EPOCH_MILLIS_THRESHOLD = new BigDecimal("1e11");
 
     @Schema(title = "Webhook body", description = "`{{ trigger.body }}` from the core Webhook trigger, already parsed as JSON.")
     @PluginProperty(group = "main")
@@ -131,7 +136,9 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
         var rToken = runContext.render(signatureToken).as(String.class).orElse(null);
 
         Boolean verified = null;
-        if (rToken != null) {
+        if (rToken == null) {
+            runContext.logger().warn("No signatureToken set: the GitGuardian webhook signature and timestamp are not verified, so anyone who can reach the webhook URL can forge events.");
+        } else {
             var failure = verify(rBody, rRawBody, rHeaders, rToken, runContext.render(maxClockSkew).as(Duration.class).orElse(Duration.ofMinutes(5)));
             verified = failure == null;
             if (!verified) {
@@ -274,12 +281,20 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
         return null;
     }
 
+    /** Accepts ISO-8601, epoch seconds (optionally fractional) and epoch milliseconds; values from 1e11 up are read as milliseconds, which is year 5138 in seconds. */
     private static Instant parseInstant(String value) {
+        var trimmed = value.trim();
+        if (EPOCH.matcher(trimmed).matches()) {
+            var number = new BigDecimal(trimmed);
+            return number.abs().compareTo(EPOCH_MILLIS_THRESHOLD) >= 0
+                ? Instant.ofEpochMilli(number.longValue())
+                : Instant.ofEpochSecond(number.longValue(), number.remainder(BigDecimal.ONE).movePointRight(9).longValue());
+        }
         try {
-            return Instant.parse(value);
+            return Instant.parse(trimmed);
         } catch (Exception e) {
             try {
-                return java.time.OffsetDateTime.parse(value).toInstant();
+                return OffsetDateTime.parse(trimmed).toInstant();
             } catch (Exception ignored) {
                 return null;
             }
