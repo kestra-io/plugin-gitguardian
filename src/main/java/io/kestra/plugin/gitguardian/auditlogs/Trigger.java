@@ -100,7 +100,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
 
         var now = Instant.now();
         var windowEnd = watermark.getTimestamp().plus(MAX_WINDOW);
-        var windowed = windowEnd.isBefore(now);
+        var windowed = windowEnd.isBefore(now.minus(getInterval()));
         var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
         var undelivered = new ArrayList<AuditLog>();
         try (var client = client(runContext)) {
@@ -121,7 +121,8 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
 
         if (undelivered.isEmpty()) {
             if (windowed) {
-                persistWatermark(kv, key, new Watermark(windowEnd, Set.of()));
+                // Keep the overlap so an event dated just before windowEnd, or listed late, is still read next poll.
+                persistWatermark(kv, key, new Watermark(windowEnd.minus(OVERLAP), Set.of()));
             }
             return Optional.empty();
         }

@@ -144,11 +144,11 @@ class AuditLogsTest {
     @Test
     void triggerCatchesUpAnOldBacklogOneWindowPerPoll(WireMockRuntimeInfo wireMock) throws Exception {
         var seed = Instant.now().truncatedTo(ChronoUnit.MILLIS).minus(Duration.ofDays(3));
-        // Windows are [seed, seed+1d], [seed+1d, seed+2d]; the event sits in the second one.
+        // The empty first window [seed, seed+1d] leaves the watermark at seed+1d-1s, so the second ends at seed+2d-1s.
         stubFor(get(urlPathEqualTo("/v1/audit_logs"))
             .willReturn(okJson("[]")));
         stubFor(get(urlPathEqualTo("/v1/audit_logs"))
-            .withQueryParam("date_before", equalTo(seed.plus(Duration.ofDays(2)).toString()))
+            .withQueryParam("date_before", equalTo(seed.plus(Duration.ofDays(2)).minusSeconds(1).toString()))
             .willReturn(okJson("[" + event(1, seed.plus(Duration.ofHours(36)).toString(), "incident.ignored") + "]")));
 
         var trigger = Trigger.builder()
@@ -168,5 +168,37 @@ class AuditLogsTest {
         var fired = trigger.eval(ctx.getKey(), triggerContext);
         assertThat(fired.isPresent(), is(true));
         assertThat(fired.get().trigger().getVariables().get("count"), is(1));
+        assertThat(trigger.eval(ctx.getKey(), triggerContext).isPresent(), is(false));
+    }
+
+    @Test
+    void triggerStillDeliversAnEventDatedJustBeforeAnEmptyWindowEnd(WireMockRuntimeInfo wireMock) throws Exception {
+        var seed = Instant.now().truncatedTo(ChronoUnit.MILLIS).minus(Duration.ofDays(3));
+        stubFor(get(urlPathEqualTo("/v1/audit_logs")).willReturn(okJson("[]")));
+
+        var trigger = Trigger.builder()
+            .id(IdUtils.create()).type(Trigger.class.getName())
+            .apiUrl(Property.ofValue(wireMock.getHttpBaseUrl())).apiKey(Property.ofValue("k"))
+            .interval(Duration.ofMinutes(5))
+            .build();
+        var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
+        var triggerContext = ctx.getValue().context();
+        assertThat(trigger.eval(ctx.getKey(), triggerContext).isPresent(), is(false));
+
+        var kv = ctx.getKey().getRunContext().namespaceKv(triggerContext.getNamespace());
+        var key = "gitguardian_auditlogs_watermark_" + triggerContext.getFlowId().length() + "_" + triggerContext.getFlowId() + "_" + triggerContext.getTriggerId().length() + "_" + triggerContext.getTriggerId();
+        kv.put(key, new KVValueAndMetadata(new KVMetadata(null, (Instant) null), "{\"timestamp\":\"" + seed + "\",\"boundaryIds\":[]}"));
+
+        // Empty window [seed, seed+1d]: nothing fires and the watermark must stay inside the overlap.
+        assertThat(trigger.eval(ctx.getKey(), triggerContext).isPresent(), is(false));
+
+        // The API now lists an event dated 500 ms before the end of the window that came back empty.
+        stubFor(get(urlPathEqualTo("/v1/audit_logs"))
+            .willReturn(okJson("[" + event(1, seed.plus(Duration.ofDays(1)).minusMillis(500).toString(), "incident.ignored") + "]")));
+
+        var fired = trigger.eval(ctx.getKey(), triggerContext);
+        assertThat(fired.isPresent(), is(true));
+        assertThat(fired.get().trigger().getVariables().get("count"), is(1));
+        assertThat(trigger.eval(ctx.getKey(), triggerContext).isPresent(), is(false));
     }
 }
