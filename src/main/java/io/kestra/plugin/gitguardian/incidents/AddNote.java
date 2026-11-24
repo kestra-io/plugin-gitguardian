@@ -39,11 +39,15 @@ import java.util.Map;
                 namespace: company.security
 
                 tasks:
-                  - id: note
-                    type: io.kestra.plugin.gitguardian.incidents.AddNote
-                    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                    incidentId: "{{ trigger.incident.id }}"
-                    comment: "Handled by Kestra execution {{ execution.id }} in flow {{ flow.namespace }}.{{ flow.id }}"
+                  - id: each_incident
+                    type: io.kestra.plugin.core.flow.Loop
+                    values: "{{ trigger.incidents }}"
+                    tasks:
+                      - id: note
+                        type: io.kestra.plugin.gitguardian.incidents.AddNote
+                        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+                        incidentId: "{{ fromJson(item.value).id }}"
+                        comment: "Handled by Kestra execution {{ execution.id }} in flow {{ flow.namespace }}.{{ flow.id }}"
 
                 triggers:
                   - id: on_incident

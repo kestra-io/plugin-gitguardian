@@ -49,14 +49,14 @@ import lombok.experimental.SuperBuilder;
                     status: FAIL
 
                   - id: recheck
-                    type: io.kestra.plugin.core.flow.ForEach
+                    type: io.kestra.plugin.core.flow.Loop
                     values: "{{ outputs.failing.rows }}"
                     tasks:
                       - id: run
                         type: io.kestra.plugin.gitguardian.healthchecks.Run
                         apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                        integrationType: "{{ json(taskrun.value).type }}"
-                        instanceId: "{{ json(taskrun.value).instance.id }}"
+                        integrationType: "{{ fromJson(item.value).type }}"
+                        instanceId: "{{ fromJson(item.value).instance.id }}"
                 """
         )
     }

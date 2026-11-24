@@ -21,7 +21,7 @@ import lombok.experimental.SuperBuilder;
 public abstract class AbstractIncidentAction extends AbstractGitGuardianTask {
     protected static final String WRITE_SCOPE = "incidents:write";
 
-    @Schema(title = "Incident ID", description = "Typically `{{ trigger.incident.id }}` in a flow started by the incidents trigger.")
+    @Schema(title = "Incident ID", description = "In a flow started by the incidents trigger, loop over `trigger.incidents` and use `{{ fromJson(item.value).id }}`.")
     @NotNull
     @PluginProperty(group = "main")
     protected Property<Long> incidentId;

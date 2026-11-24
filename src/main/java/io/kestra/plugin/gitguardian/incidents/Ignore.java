@@ -39,20 +39,23 @@ import java.util.Map;
                 namespace: company.security
 
                 tasks:
-                  - id: ignore
-                    type: io.kestra.plugin.gitguardian.incidents.Ignore
-                    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                    incidentId: "{{ trigger.incident.id }}"
-                    ignoreReason: TEST_CREDENTIAL
+                  - id: each_incident
+                    type: io.kestra.plugin.core.flow.Loop
+                    values: "{{ trigger.incidents }}"
+                    tasks:
+                      - id: ignore
+                        type: io.kestra.plugin.gitguardian.incidents.Ignore
+                        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+                        incidentId: "{{ fromJson(item.value).id }}"
+                        ignoreReason: TEST_CREDENTIAL
 
                 triggers:
                   - id: on_incident
                     type: io.kestra.plugin.gitguardian.incidents.Trigger
                     apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
                     validity: INVALID
-                    conditions:
-                      - type: io.kestra.plugin.core.condition.Expression
-                        expression: "{{ 'TEST_FILE' in trigger.incident.tags }}"
+                    tags:
+                      - TEST_FILE
                 """
         )
     }

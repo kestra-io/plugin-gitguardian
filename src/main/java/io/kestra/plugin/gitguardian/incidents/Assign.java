@@ -39,11 +39,15 @@ import java.util.Map;
                 namespace: company.security
 
                 tasks:
-                  - id: assign
-                    type: io.kestra.plugin.gitguardian.incidents.Assign
-                    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                    incidentId: "{{ trigger.incident.id }}"
-                    assigneeEmail: security-oncall@company.com
+                  - id: each_incident
+                    type: io.kestra.plugin.core.flow.Loop
+                    values: "{{ trigger.incidents }}"
+                    tasks:
+                      - id: assign
+                        type: io.kestra.plugin.gitguardian.incidents.Assign
+                        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+                        incidentId: "{{ fromJson(item.value).id }}"
+                        assigneeEmail: security-oncall@company.com
 
                 triggers:
                   - id: on_incident

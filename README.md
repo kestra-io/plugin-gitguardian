@@ -73,7 +73,7 @@ Outputs: `policyBreakCount`, `documentCount`, per-document `results` (detector, 
 
 Two ways to start a flow from an incident, use either or both:
 
-**Polling trigger** (`incidents.Trigger`): polls `GET /v1/incidents/secrets` and starts one execution per poll carrying the new incidents (`trigger.incidents`, oldest first, at most `maxItemsPerPoll`, default 100), with server-side filters. State lives in the namespace KV store, so restarts never re-fire or skip an incident.
+**Polling trigger** (`incidents.Trigger`; `Loop` hands each item over as a JSON string, hence `fromJson(item.value)`): polls `GET /v1/incidents/secrets` and starts one execution per poll carrying the new incidents (`trigger.incidents`, oldest first, at most `maxItemsPerPoll`, default 100), with server-side filters. State lives in the namespace KV store, so restarts never re-fire or skip an incident.
 
 ```yaml
 id: incident_response
@@ -81,25 +81,24 @@ namespace: company.security
 
 tasks:
   - id: each_incident
-    type: io.kestra.plugin.core.flow.ForEach
+    type: io.kestra.plugin.core.flow.Loop
     values: "{{ trigger.incidents }}"
     tasks:
       - id: notify
         type: io.kestra.plugin.slack.SlackIncomingWebhook
         url: "{{ secret('SLACK_WEBHOOK') }}"
-        payload: |
-          {"text": ":rotating_light: {{ fromJson(taskrun.value).incidentName }} ({{ fromJson(taskrun.value).severity }}) {{ fromJson(taskrun.value).gitguardianUrl }}"}
+        messageText: ":rotating_light: {{ fromJson(item.value).incidentName }} ({{ fromJson(item.value).severity }}) {{ fromJson(item.value).gitguardianUrl }}"
 
       - id: assign
         type: io.kestra.plugin.gitguardian.incidents.Assign
         apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-        incidentId: "{{ fromJson(taskrun.value).id }}"
+        incidentId: "{{ fromJson(item.value).id }}"
         assigneeEmail: security-oncall@company.com
 
       - id: note
         type: io.kestra.plugin.gitguardian.incidents.AddNote
         apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-        incidentId: "{{ fromJson(taskrun.value).id }}"
+        incidentId: "{{ fromJson(item.value).id }}"
         comment: "Triage started by Kestra execution {{ execution.id }}"
 
 triggers:
@@ -177,7 +176,7 @@ tasks:
 
 ### 5. Audit logs to your SIEM
 
-`auditlogs.List` with `fetchType: STORE` exports a period of workspace activity to internal storage for S3, Splunk, Elasticsearch or a warehouse. `auditlogs.Trigger` fires one execution per poll with every new event, optionally restricted to sensitive `eventNames` such as `incident.ignored` or `api_token.created`.
+`auditlogs.List` with `fetchType: STORE` exports a period of workspace activity to internal storage for S3, Splunk, Elasticsearch or a warehouse. `auditlogs.Trigger` fires one execution per poll with the new events (capped by `maxItemsPerPoll`, oldest first), optionally restricted to sensitive `eventNames` such as `incident.ignored` or `api_token.created`.
 
 ### 6. Keep the perimeter healthy
 

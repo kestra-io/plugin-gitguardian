@@ -38,11 +38,15 @@ import java.util.LinkedHashMap;
                 namespace: company.security
 
                 tasks:
-                  - id: assign
-                    type: io.kestra.plugin.gitguardian.publicincidents.Assign
-                    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                    incidentId: "{{ trigger.incident.id }}"
-                    assigneeEmail: security-oncall@company.com
+                  - id: each_incident
+                    type: io.kestra.plugin.core.flow.Loop
+                    values: "{{ trigger.incidents }}"
+                    tasks:
+                      - id: assign
+                        type: io.kestra.plugin.gitguardian.publicincidents.Assign
+                        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+                        incidentId: "{{ fromJson(item.value).id }}"
+                        assigneeEmail: security-oncall@company.com
 
                 triggers:
                   - id: on_public_leak

@@ -39,10 +39,14 @@ import lombok.experimental.SuperBuilder;
                 namespace: company.security
 
                 tasks:
-                  - id: get
-                    type: io.kestra.plugin.gitguardian.honeytokens.Get
-                    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                    honeytokenId: "{{ trigger.event.honeytokenId }}"
+                  - id: each_event
+                    type: io.kestra.plugin.core.flow.Loop
+                    values: "{{ trigger.events }}"
+                    tasks:
+                      - id: get
+                        type: io.kestra.plugin.gitguardian.honeytokens.Get
+                        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+                        honeytokenId: "{{ fromJson(item.value).honeytokenId }}"
 
                 triggers:
                   - id: on_event

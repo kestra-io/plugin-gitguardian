@@ -41,13 +41,17 @@ import java.util.Map;
                 namespace: company.security
 
                 tasks:
-                  - id: update
-                    type: io.kestra.plugin.gitguardian.publicincidents.Update
-                    apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                    incidentId: "{{ trigger.incident.id }}"
-                    severity: CRITICAL
-                    customTags:
-                      team: platform
+                  - id: each_incident
+                    type: io.kestra.plugin.core.flow.Loop
+                    values: "{{ trigger.incidents }}"
+                    tasks:
+                      - id: update
+                        type: io.kestra.plugin.gitguardian.publicincidents.Update
+                        apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
+                        incidentId: "{{ fromJson(item.value).id }}"
+                        severity: CRITICAL
+                        customTags:
+                          team: platform
 
                 triggers:
                   - id: on_public_leak
