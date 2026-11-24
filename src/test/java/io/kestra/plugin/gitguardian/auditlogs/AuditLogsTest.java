@@ -6,12 +6,16 @@ import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.common.FetchType;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.storages.kv.KVMetadata;
+import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Map;
 
@@ -135,5 +139,34 @@ class AuditLogsTest {
 
         assertThat(delivered, contains(1L, 2L, 3L, 4L));
         assertThat(trigger.eval(ctx.getKey(), ctx.getValue().context()).isPresent(), is(false));
+    }
+
+    @Test
+    void triggerCatchesUpAnOldBacklogOneWindowPerPoll(WireMockRuntimeInfo wireMock) throws Exception {
+        var seed = Instant.now().truncatedTo(ChronoUnit.MILLIS).minus(Duration.ofDays(3));
+        // Windows are [seed, seed+1d], [seed+1d, seed+2d]; the event sits in the second one.
+        stubFor(get(urlPathEqualTo("/v1/audit_logs"))
+            .willReturn(okJson("[]")));
+        stubFor(get(urlPathEqualTo("/v1/audit_logs"))
+            .withQueryParam("date_before", equalTo(seed.plus(Duration.ofDays(2)).toString()))
+            .willReturn(okJson("[" + event(1, seed.plus(Duration.ofHours(36)).toString(), "incident.ignored") + "]")));
+
+        var trigger = Trigger.builder()
+            .id(IdUtils.create()).type(Trigger.class.getName())
+            .apiUrl(Property.ofValue(wireMock.getHttpBaseUrl())).apiKey(Property.ofValue("k"))
+            .interval(Duration.ofMinutes(5))
+            .build();
+        var ctx = TestsUtils.mockTrigger(runContextFactory, trigger);
+        var triggerContext = ctx.getValue().context();
+        assertThat(trigger.eval(ctx.getKey(), triggerContext).isPresent(), is(false));
+
+        var kv = ctx.getKey().getRunContext().namespaceKv(triggerContext.getNamespace());
+        var key = "gitguardian_auditlogs_watermark_" + triggerContext.getFlowId().length() + "_" + triggerContext.getFlowId() + "_" + triggerContext.getTriggerId().length() + "_" + triggerContext.getTriggerId();
+        kv.put(key, new KVValueAndMetadata(new KVMetadata(null, (Instant) null), "{\"timestamp\":\"" + seed + "\",\"boundaryIds\":[]}"));
+
+        assertThat(trigger.eval(ctx.getKey(), triggerContext).isPresent(), is(false));
+        var fired = trigger.eval(ctx.getKey(), triggerContext);
+        assertThat(fired.isPresent(), is(true));
+        assertThat(fired.get().trigger().getVariables().get("count"), is(1));
     }
 }

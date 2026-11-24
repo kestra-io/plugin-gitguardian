@@ -37,7 +37,8 @@ import java.util.Set;
         Polls `GET /v1/audit_logs` at `interval` and starts one execution per poll carrying the new events since \
         the last poll (`trigger.events`), so a burst of activity produces one execution, not one per event. A poll \
         carries at most `maxItemsPerPoll` events (default 100) to keep the output small; the rest fire on the next polls. \
-        The API cannot sort audit logs, so each poll reads every event since the watermark, then delivers the oldest ones. \
+        The API cannot sort audit logs, so each poll reads every event of a window of at most one day after the \
+        watermark, then delivers the oldest ones. A longer backlog is caught up one window per poll. \
         Optionally restrict to `eventNames`. The watermark (newest delivered date plus the IDs sharing it) is kept \
         in the flow namespace KV store; on the first poll it is seeded at the current time and nothing fires. \
         Requires the `audit_logs:read` scope.
@@ -77,6 +78,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
     private static final String SCOPE = "audit_logs:read";
     private static final int PAGE_SIZE = 100;
     private static final Duration OVERLAP = Duration.ofSeconds(1);
+    private static final Duration MAX_WINDOW = Duration.ofDays(1);
 
     @Schema(title = "Only these event names", description = "For example `incident.ignored`. All events when omitted. Filtered server-side one name at a time.")
     @PluginProperty(group = "processing")
@@ -96,6 +98,9 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
             return Optional.empty();
         }
 
+        var now = Instant.now();
+        var windowEnd = watermark.getTimestamp().plus(MAX_WINDOW);
+        var windowed = windowEnd.isBefore(now);
         var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
         var undelivered = new ArrayList<AuditLog>();
         try (var client = client(runContext)) {
@@ -105,6 +110,9 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
                 query.put("event_name", name);
                 query.put("per_page", PAGE_SIZE);
                 query.put("date_after", watermark.getTimestamp().minus(OVERLAP).toString());
+                if (windowed) {
+                    query.put("date_before", windowEnd.toString());
+                }
                 query.values().removeIf(value -> value == null);
                 // The endpoint has no ordering parameter, so the cap cannot stop the walk: it may list newest first.
                 undelivered.addAll(collectUndelivered(client, "/audit_logs", query, SCOPE, AuditLog.class, watermark, Integer.MAX_VALUE, AuditLog::getDate, event -> String.valueOf(event.getId()), runContext.logger()));
@@ -112,6 +120,9 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
         }
 
         if (undelivered.isEmpty()) {
+            if (windowed) {
+                persistWatermark(kv, key, new Watermark(windowEnd, Set.of()));
+            }
             return Optional.empty();
         }
         var batch = oldest(undelivered, cap, AuditLog::getDate, event -> String.valueOf(event.getId()));
