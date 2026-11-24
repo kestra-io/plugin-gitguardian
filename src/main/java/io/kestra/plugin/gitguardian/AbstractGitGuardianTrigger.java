@@ -37,7 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
-/** Base class for GitGuardian polling triggers: connection properties (duplicated from {@link AbstractGitGuardianTask}, a trigger cannot extend {@code Task}) and the watermark persistence every poller shares so a delivered item is never re-fired. */
+/** Connection properties (a trigger cannot extend Task) and watermark state shared by the pollers. */
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
@@ -105,7 +105,7 @@ public abstract class AbstractGitGuardianTrigger extends AbstractTrigger impleme
         persistState(kv, key, watermark);
     }
 
-    /** A read failure is never treated as "no state yet": that would silently re-seed the baseline and drop every item accumulated since the last successful poll. */
+    /** A read failure is never a first poll: re-seeding the baseline would drop the backlog. */
     protected <T> Optional<T> readState(KVStore kv, String key, Class<T> type) {
         try {
             return kv.getValue(key).map(value -> parse(String.valueOf(value.value()), type));
@@ -116,7 +116,7 @@ public abstract class AbstractGitGuardianTrigger extends AbstractTrigger impleme
         }
     }
 
-    /** A write failure must fail the poll loudly, otherwise the next poll re-delivers the same item. */
+    /** A write failure fails the poll, otherwise the next one re-delivers the same item. */
     protected void persistState(KVStore kv, String key, Object state) {
         try {
             kv.put(key, new KVValueAndMetadata(new KVMetadata(null, (Instant) null), MAPPER.writeValueAsString(state)));
@@ -125,7 +125,7 @@ public abstract class AbstractGitGuardianTrigger extends AbstractTrigger impleme
         }
     }
 
-    /** Walks a date-ascending endpoint and stops as soon as {@code cap} undelivered items are collected, so a backlog is drained over several polls instead of being fully read on each one. */
+    /** Walks the pages and stops once {@code cap} undelivered items are collected (ascending endpoints only). */
     protected <T> List<T> collectUndelivered(GitGuardianClient client, String path, Map<String, Object> query, String scope, Class<T> itemType, Watermark watermark, int cap, Function<T, Instant> timestampOf, Function<T, String> idOf, Logger logger) throws Exception {
         var pending = new ArrayList<T>();
         client.walk(path, query, scope, itemType, page -> {
@@ -142,7 +142,6 @@ public abstract class AbstractGitGuardianTrigger extends AbstractTrigger impleme
         return pending;
     }
 
-    /** The {@code cap} oldest items, ordered oldest first. */
     protected <T> List<T> oldest(List<T> items, int cap, Function<T, Instant> timestampOf, Function<T, String> idOf) {
         var sorted = new ArrayList<>(items);
         sorted.sort(Comparator.comparing(timestampOf).thenComparing(idOf));
@@ -165,7 +164,7 @@ public abstract class AbstractGitGuardianTrigger extends AbstractTrigger impleme
         }
     }
 
-    /** Newest delivered timestamp plus every delivered ID sharing that exact timestamp, so items that tie on the boundary are neither skipped nor re-fired. */
+    /** Newest delivered timestamp plus the IDs sharing it, so ties on the boundary are never skipped or re-fired. */
     @Getter
     @Builder
     @NoArgsConstructor

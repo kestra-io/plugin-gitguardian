@@ -6,8 +6,8 @@
 - `scan.Scan` scans inline content and internal storage files for secrets via `POST /v1/scan` and `POST /v1/multiscan`.
 - `incidents.Trigger` polls `GET /v1/incidents/secrets` and fires one execution per poll with the new incidents, capped by `maxItemsPerPoll` (KV watermark); `incidents.List` / `Get` read incidents; `Assign`, `Update`, `AddNote`, `Ignore`, `Reopen`, `Resolve` write them.
 - `scan.CreateIncidents` + `sources.CreateCustomSource` register incidents for non-VCS data; `sources.List` / `Get` / `Scan` manage the perimeter.
-- `honeytokens.Create` (value returned as `EncryptedString`) / `Get` / `List` / `Revoke` / `Reset` and `honeytokens.Trigger` (one execution per poll with the new events and their honeytokens).
-- `auditlogs.List` / `Trigger` (batch: one execution per poll with all new events) and `healthchecks.List` / `Run` / `Trigger` (batch, one fire per failure streak, tracked as a KV set of delivered `type:instance@firstStartedAt` keys).
+- `honeytokens.Create` (value returned as `EncryptedString`) / `Get` / `List` / `Revoke` / `Reset` and `honeytokens.Trigger` (one execution per poll with the oldest new events, capped by `maxItemsPerPoll`, and their honeytokens; the events endpoint has no date filter, so each poll reads newest first back to the watermark).
+- `auditlogs.List` / `Trigger` (one execution per poll with the oldest new events, capped by `maxItemsPerPoll`; the API cannot sort, so each poll reads every event since the watermark before capping) and `healthchecks.List` / `Run` / `Trigger` (batch, one fire per failure streak, tracked as a KV set of delivered `type:instance@firstStartedAt` keys).
 - `teams.List`, `members.List`: read-only lookups.
 - `publicincidents.*`: Public Monitoring twin of `incidents` (path `/v1/public-incidents/secrets`; ignore/resolve take comma-separated reasons; severity and custom tags are separate `set_*` POSTs). IDs are not interchangeable with internal incidents.
 - `webhooks.Receive`: pairs with the core `Webhook` trigger; HMAC-SHA256 keyed `Timestamp` header + signature token over the raw JSON. Kestra 2.0.9 hands the body parsed, so verification tries Python `json.dumps` formatting and compact JSON; `rawBody` enables a strict check.
@@ -24,7 +24,7 @@
 
 Single-module plugin. Source packages under `io.kestra.plugin.gitguardian`:
 
-- root: `GitGuardianConnectionInterface` (shared property wording), `AbstractGitGuardianTask` / `AbstractGitGuardianTrigger` (connection properties, client factory; the trigger base also owns the `maxItemsPerPoll` cap and the KV `Watermark` = newest delivered timestamp + boundary IDs, plus the shared collect / cap / advance helpers), `GitGuardianClient` (Kestra `HttpClient` wrapper: `Authorization: Token`, `Link`-header cursor pagination, 429 retry, error mapping), `GitGuardianApiException`, `GitGuardianPage`.
+- root: `GitGuardianConnectionInterface` (shared property wording), `AbstractGitGuardianTask` / `AbstractGitGuardianTrigger` / `AbstractIncidentTrigger` (shared poll loop of `incidents.Trigger` and `publicincidents.Trigger`) (connection properties, client factory; the trigger base also owns the `maxItemsPerPoll` cap and the KV `Watermark` = newest delivered timestamp + boundary IDs, plus the shared collect / cap / advance helpers), `GitGuardianClient` (Kestra `HttpClient` wrapper: `Authorization: Token`, `Link`-header cursor pagination, 429 retry, error mapping), `GitGuardianApiException`, `GitGuardianPage`.
 - `scan`: `Scan` task and the `ScanResult` / `PolicyBreak` / `PolicyBreakMatch` response models.
 - `incidents`: `Trigger`, `List`, `Get`, and the write tasks sharing `AbstractIncidentAction` (`incidentId`, `incidents:write`); `Incident` / `Detector` / `CustomTag` / `IncidentNote` models; `Severity` / `IncidentStatus` / `Validity` / `IgnoreReason` enums.
 - `AbstractListTask` holds `maxResults` / `perPage` / `fetchType` and `list(...)` for every list task; `ListRunner` implements the `fetchType` contract (FETCH / FETCH_ONE / STORE / NONE + `maxResults`) once for every list task; each task keeps its own typed `Output` so generated docs stay typed.
@@ -36,7 +36,7 @@ Response models use `@JsonAlias("snake_case")` on camelCase fields so task outpu
 
 Infrastructure dependencies (Docker Compose services):
 
-- `app`: local Kestra `v2.0.8` with `build/libs` mounted as `/app/plugins`.
+- `app`: local Kestra `v2.0.9` with `build/libs` mounted as `/app/plugins`.
 
 ### Key Plugin Classes
 

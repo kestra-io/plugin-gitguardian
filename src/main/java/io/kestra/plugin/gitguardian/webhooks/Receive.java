@@ -106,7 +106,7 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
     @PluginProperty(group = "main")
     private Property<Map<String, List<String>>> headers;
 
-    @Schema(title = "Signature token", description = "The signature token configured on the GitGuardian custom webhook. Signature verification is skipped when omitted.")
+    @Schema(title = "Signature token", description = "The signature token configured on the GitGuardian custom webhook. Signature verification is skipped when omitted, so only run write tasks (assign, resolve, ignore, ...) when the `verified` output is `true`.")
     @PluginProperty(secret = true, group = "main")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude

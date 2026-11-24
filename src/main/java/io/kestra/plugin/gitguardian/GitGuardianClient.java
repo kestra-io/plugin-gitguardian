@@ -25,7 +25,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/** Wraps a Kestra {@link HttpClient} with GitGuardian's token authentication, query-string building, `Link`-header cursor pagination, 429 retries and non-2xx error mapping. One instance is scoped to a single task run or trigger poll and must be closed by its owner. */
+/** GitGuardian HTTP client: token auth, cursor pagination, 429 retries, error mapping. Close after use. */
 public final class GitGuardianClient implements Closeable {
     public static final String USER_AGENT = "kestra-plugin-gitguardian";
 
