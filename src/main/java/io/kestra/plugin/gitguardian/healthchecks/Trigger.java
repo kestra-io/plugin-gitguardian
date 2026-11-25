@@ -56,10 +56,18 @@ import java.util.TreeSet;
 
                 tasks:
                   - id: page
-                    type: io.kestra.plugin.pagerduty.Alert
-                    integrationKey: "{{ secret('PAGERDUTY_KEY') }}"
-                    payloadSummary: "GitGuardian integration failing: {{ trigger.checks | jq('[.[].instance.name]') | first }}"
-                    payloadSeverity: ERROR
+                    type: io.kestra.plugin.pagerduty.PagerDutyAlert
+                    url: "https://events.pagerduty.com/v2/enqueue"
+                    payload: |
+                      {
+                        "routing_key": "{{ secret('PAGERDUTY_KEY') }}",
+                        "event_action": "trigger",
+                        "payload": {
+                          "summary": "GitGuardian integration failing: {{ trigger.checks | jq('[.[].instance.name]') | first }}",
+                          "source": "kestra",
+                          "severity": "error"
+                        }
+                      }
 
                 triggers:
                   - id: on_failure

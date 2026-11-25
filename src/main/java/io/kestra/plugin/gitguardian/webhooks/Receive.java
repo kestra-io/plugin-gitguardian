@@ -98,7 +98,7 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
     @PluginProperty(group = "main")
     private Property<Map<String, Object>> body;
 
-    @Schema(title = "Raw webhook body", description = "Exact request body as a string, when available (for example from a stored `trigger.uri`). Used instead of `body` for a strict signature check and parsed when `body` is omitted.")
+    @Schema(title = "Raw webhook body", description = "Exact request body as a string, when available (for example from a stored `trigger.uri`). When set, it is used instead of `body` for both the strict signature check and the typed outputs.")
     @PluginProperty(group = "main")
     private Property<String> rawBody;
 
@@ -112,7 +112,7 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
     @EqualsAndHashCode.Exclude
     private Property<String> signatureToken;
 
-    @Schema(title = "Maximum accepted age of the event", description = "Difference allowed between the `Timestamp` header and now. Defaults to `PT5M`.")
+    @Schema(title = "Maximum accepted age of the event", description = "Difference allowed between the `Timestamp` header and the execution start date, so a queued or retried run is not taken for a replay. Defaults to `PT5M`.")
     @Builder.Default
     @PluginProperty(group = "advanced")
     private Property<Duration> maxClockSkew = Property.ofValue(Duration.ofMinutes(5));
@@ -124,11 +124,11 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rRawBody = runContext.render(rawBody).as(String.class).orElse(null);
-        var rBody = runContext.render(body).asMap(String.class, Object.class);
-        if (rBody.isEmpty() && rRawBody != null) {
-            rBody = MAPPER.readValue(rRawBody, MAPPER.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
-        }
+        var rRawBody = runContext.render(rawBody).as(String.class).filter(value -> !value.isBlank()).orElse(null);
+        // The HMAC covers rawBody when set, so outputs come from the same bytes.
+        var rBody = rRawBody != null
+            ? MAPPER.<Map<String, Object>>readValue(rRawBody, MAPPER.getTypeFactory().constructMapType(Map.class, String.class, Object.class))
+            : runContext.render(body).asMap(String.class, Object.class);
         if (rBody.isEmpty()) {
             throw new IllegalArgumentException("body (or rawBody) is required to parse a GitGuardian webhook event.");
         }
@@ -139,7 +139,7 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
         if (rToken == null) {
             runContext.logger().warn("No signatureToken set: the GitGuardian webhook signature and timestamp are not verified, so anyone who can reach the webhook URL can forge events.");
         } else {
-            var failure = verify(rBody, rRawBody, rHeaders, rToken, runContext.render(maxClockSkew).as(Duration.class).orElse(Duration.ofMinutes(5)));
+            var failure = verify(rBody, rRawBody, rHeaders, rToken, runContext.render(maxClockSkew).as(Duration.class).orElse(Duration.ofMinutes(5)), executionStart(runContext));
             verified = failure == null;
             if (!verified) {
                 if (runContext.render(failOnInvalidSignature).as(Boolean.class).orElse(true)) {
@@ -163,12 +163,22 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
             .honeytoken(convert(rBody.get("honeytoken"), Honeytoken.class))
             .honeytokenEvent(convert(rBody.get("honeytoken_event"), HoneytokenEvent.class))
             .occurrence(rBody.get("occurrence") instanceof Map<?, ?> occurrence ? (Map<String, Object>) occurrence : null)
-            .payload(rBody)
             .build();
     }
 
+    /** The execution start date, so a queued or retried run is judged against when the event was received; falls back to now outside an execution. */
+    private static Instant executionStart(RunContext runContext) {
+        if (runContext.getVariables().get("execution") instanceof Map<?, ?> execution && execution.get("startDate") != null) {
+            var parsed = parseInstant(String.valueOf(execution.get("startDate")));
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return Instant.now();
+    }
+
     /** Returns {@code null} when valid, otherwise a plain-language reason. */
-    private static String verify(Map<String, Object> body, String rawBody, Map<String, List<String>> headers, String token, Duration maxClockSkew) throws Exception {
+    private static String verify(Map<String, Object> body, String rawBody, Map<String, List<String>> headers, String token, Duration maxClockSkew, Instant reference) throws Exception {
         var signature = header(headers, SIGNATURE_HEADERS);
         if (signature == null) {
             return "no Gitguardian-Signature header. Enable the signature token on the GitGuardian custom webhook or remove signatureToken from the task.";
@@ -181,9 +191,9 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
         if (sent == null) {
             return "unparseable Timestamp header '%s'.".formatted(timestamp);
         }
-        var skew = Duration.between(sent, Instant.now()).abs();
+        var skew = Duration.between(sent, reference).abs();
         if (skew.compareTo(maxClockSkew) > 0) {
-            return "event timestamp %s is %s away from now, above maxClockSkew %s (possible replay).".formatted(sent, skew, maxClockSkew);
+            return "event timestamp %s is %s away from the execution start, above maxClockSkew %s (possible replay).".formatted(sent, skew, maxClockSkew);
         }
 
         var expected = signature.toLowerCase(Locale.ROOT).startsWith("sha256=") ? signature.substring(7) : signature;
@@ -344,8 +354,5 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
 
         @Schema(title = "The occurrence, for `new_occurrence` events", description = "Raw GitGuardian fields: `id`, `incident_id`, `kind`, `sha`, `author_name`, `date`, `url`, `source`, and match positions.")
         private final Map<String, Object> occurrence;
-
-        @Schema(title = "The full event payload as sent by GitGuardian")
-        private final Map<String, Object> payload;
     }
 }

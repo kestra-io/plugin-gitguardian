@@ -163,7 +163,44 @@ class ReceiveTest {
 
         assertThat(output.getVerified(), nullValue());
         assertThat(output.getWebhookName(), is("kestra"));
-        assertThat(output.getPayload().get("source"), is("GitGuardian"));
+    }
+
+    @Test
+    void judgesTimestampAgainstExecutionStartNotTaskRunTime() throws Exception {
+        var sent = Instant.now().minus(Duration.ofHours(1));
+        var timestamp = sent.toString();
+        var payload = pythonPayload(timestamp);
+
+        // The run starts right after the event but the task only runs later (queued or retried).
+        var output = Receive.builder()
+            .id(IdUtils.create()).type(Receive.class.getName())
+            .body(Property.ofValue(parsed(payload)))
+            .headers(Property.ofValue(Map.of("Gitguardian-Signature", List.of(sign(timestamp, payload)), "Timestamp", List.of(timestamp))))
+            .signatureToken(Property.ofValue(TOKEN))
+            .build()
+            .run(runContextFactory.of(Map.of("execution", Map.of("startDate", sent.plusSeconds(30).toString()))));
+
+        assertThat(output.getVerified(), is(true));
+    }
+
+    @Test
+    void outputsComeFromRawBodyWhenBothAreSet() throws Exception {
+        var timestamp = Instant.now().toString();
+        var payload = pythonPayload(timestamp);
+        var other = parsed(payload);
+        other.put("action", "incident_resolved");
+
+        var output = Receive.builder()
+            .id(IdUtils.create()).type(Receive.class.getName())
+            .body(Property.ofValue(other))
+            .rawBody(Property.ofValue(payload))
+            .headers(Property.ofValue(Map.of("Gitguardian-Signature", List.of(sign(timestamp, payload)), "Timestamp", List.of(timestamp))))
+            .signatureToken(Property.ofValue(TOKEN))
+            .build()
+            .run(runContextFactory.of(Map.of()));
+
+        assertThat(output.getVerified(), is(true));
+        assertThat(output.getAction(), is("incident_triggered"));
     }
 
     private Receive.Output verifyWithHeaderTimestamp(String headerTimestamp) throws Exception {

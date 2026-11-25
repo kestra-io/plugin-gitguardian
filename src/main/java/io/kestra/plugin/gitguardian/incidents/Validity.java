@@ -3,6 +3,8 @@ package io.kestra.plugin.gitguardian.incidents;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
+import java.util.Locale;
+
 /** Result of GitGuardian's validity check on a secret, serialized in the lowercase form the API uses. */
 public enum Validity {
     VALID,
@@ -14,7 +16,7 @@ public enum Validity {
 
     @JsonValue
     public String apiValue() {
-        return name().toLowerCase();
+        return name().toLowerCase(Locale.ROOT);
     }
 
     @JsonCreator

@@ -145,9 +145,12 @@ public class CreateIncidents extends AbstractGitGuardianTask implements Runnable
                 }
                 var mapper = JacksonMapper.ofJson();
                 if (node.isArray()) {
+                    if (node.size() != batch.size()) {
+                        throw new IllegalStateException("GitGuardian returned %d results for %d documents.".formatted(node.size(), batch.size()));
+                    }
                     for (int i = 0; i < node.size(); i++) {
                         var result = mapper.treeToValue(node.get(i), ScanResult.class);
-                        result.setFilename(i < batch.size() ? String.valueOf(batch.get(i).get("filename")) : null);
+                        result.setFilename(String.valueOf(batch.get(i).get("filename")));
                         results.add(result);
                     }
                 } else {

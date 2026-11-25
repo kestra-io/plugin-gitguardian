@@ -3,6 +3,8 @@ package io.kestra.plugin.gitguardian.healthchecks;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
+import java.util.Locale;
+
 /** Aggregate result of an integration health check run. */
 public enum HealthCheckStatus {
     PASS,
@@ -12,7 +14,7 @@ public enum HealthCheckStatus {
 
     @JsonValue
     public String apiValue() {
-        return name().toLowerCase();
+        return name().toLowerCase(Locale.ROOT);
     }
 
     @JsonCreator

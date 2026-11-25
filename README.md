@@ -172,7 +172,7 @@ tasks:
 
 ### 4. Honeytokens as intrusion tripwires
 
-`honeytokens.Create` mints a decoy AWS credential from a deployment flow and returns it encrypted (`{{ decrypt(outputs.create.encryptedToken) }}`) so it can be placed in a config file or repository without ever appearing in clear in Kestra. `honeytokens.Trigger` starts a response flow the moment the decoy is used, with the source IP, action, and honeytoken description (`trigger.events` and `trigger.honeytokens`, keyed by honeytoken ID). Close the loop with `honeytokens.Reset` once the investigation is over, or `honeytokens.Revoke` if the decoy is burned. Honeytoken webhook events (`honeytoken_triggered`, `new_honeytoken_event`) are also typed by `webhooks.Receive`.
+`honeytokens.Create` mints a decoy AWS credential from a deployment flow and returns it encrypted (`{{ fromJson(outputs.create.encryptedToken) }}`) so it can be placed in a config file or repository without ever appearing in clear in Kestra. `honeytokens.Trigger` starts a response flow the moment the decoy is used, with the source IP, action, and honeytoken description (`trigger.events` and `trigger.honeytokens`, keyed by honeytoken ID). Close the loop with `honeytokens.Reset` once the investigation is over, or `honeytokens.Revoke` if the decoy is burned. Honeytoken webhook events (`honeytoken_triggered`, `new_honeytoken_event`) are also typed by `webhooks.Receive`.
 
 ### 5. Audit logs to your SIEM
 

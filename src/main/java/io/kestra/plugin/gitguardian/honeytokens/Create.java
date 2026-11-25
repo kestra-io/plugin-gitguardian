@@ -34,8 +34,8 @@ import java.util.Map;
     description = """
         Creates a decoy credential via `POST /v1/honeytokens`. The credential itself is returned once, in the \
         `encryptedToken` output, encrypted with Kestra's secret key so it never appears in clear in execution data; \
-        decrypt it with `{{ decrypt(outputs.<task>.encryptedToken) }}` only in the task that places it (a repository, \
-        a config file, a CI variable). Requires `kestra.encryption.secret-key` to be configured and the \
+        reference it with `{{ fromJson(outputs.<task>.encryptedToken) }}` only in the task that places it (a repository, \
+        a config file, a CI variable); Kestra decrypts it when the task renders. Requires `kestra.encryption.secret-key` to be configured and the \
         `honeytokens:write` scope.
         """
 )
@@ -64,8 +64,8 @@ import java.util.Map;
                   - id: place
                     type: io.kestra.plugin.core.storage.Write
                     content: |
-                      AWS_ACCESS_KEY_ID={{ (decrypt(outputs.create.encryptedToken) | json).access_token_id }}
-                      AWS_SECRET_ACCESS_KEY={{ (decrypt(outputs.create.encryptedToken) | json).secret_key }}
+                      AWS_ACCESS_KEY_ID={{ fromJson(outputs.create.encryptedToken).access_token_id }}
+                      AWS_SECRET_ACCESS_KEY={{ fromJson(outputs.create.encryptedToken).secret_key }}
                     extension: .env
                 """
         )
@@ -74,6 +74,7 @@ import java.util.Map;
 public class Create extends AbstractGitGuardianTask implements RunnableTask<Create.Output> {
     private static final String SCOPE = "honeytokens:write";
     private static final String NOT_ENCRYPTED = "Honeytoken '%s' was created (ID %s) but its value cannot be encrypted: %s. Configure `kestra.encryption.secret-key` on the Kestra server, then revoke this honeytoken and create a new one.";
+    private static final String NO_KEY = "Cannot create honeytoken '%s': its value cannot be encrypted (%s). Configure `kestra.encryption.secret-key` on the Kestra server. Nothing was created.";
 
     @Schema(title = "Name of the honeytoken", description = "Must be unique in the workspace.")
     @NotNull
@@ -113,6 +114,9 @@ public class Create extends AbstractGitGuardianTask implements RunnableTask<Crea
             body.put("custom_tags", tags);
         }
 
+        // Fail before the POST: once the decoy exists, a missing key would leave an orphan honeytoken.
+        requireEncryption(runContext, rName);
+
         runContext.logger().info("Creating GitGuardian honeytoken '{}'", rName);
 
         try (var client = client(runContext)) {
@@ -141,13 +145,25 @@ public class Create extends AbstractGitGuardianTask implements RunnableTask<Crea
         }
     }
 
+    private static void requireEncryption(RunContext runContext, String rName) {
+        var probe = "probe";
+        try {
+            // encrypt() returns its input unchanged without a configured key.
+            if (probe.equals(EncryptedString.from(probe, runContext).getValue())) {
+                throw new IllegalStateException(NO_KEY.formatted(rName, "no encryption key is configured"));
+            }
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException(NO_KEY.formatted(rName, e.getMessage()), e);
+        }
+    }
+
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(title = "The created honeytoken, without its value")
         private final Honeytoken honeytoken;
 
-        @Schema(title = "The honeytoken value as a JSON object, encrypted", description = "For an AWS honeytoken: `{\"access_token_id\": ..., \"secret_key\": ...}`. Use `{{ decrypt(outputs.<task>.encryptedToken) }}` where it is placed.")
+        @Schema(title = "The honeytoken value as a JSON object, encrypted", description = "For an AWS honeytoken: `{\"access_token_id\": ..., \"secret_key\": ...}`. Use `{{ fromJson(outputs.<task>.encryptedToken) }}` where it is placed; Kestra decrypts it on render.")
         private final EncryptedString encryptedToken;
     }
 }

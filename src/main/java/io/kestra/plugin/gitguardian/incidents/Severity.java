@@ -3,6 +3,8 @@ package io.kestra.plugin.gitguardian.incidents;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
+import java.util.Locale;
+
 /** Severity of a secret incident, serialized in the lowercase form the GitGuardian API uses. */
 public enum Severity {
     CRITICAL,
@@ -14,7 +16,7 @@ public enum Severity {
 
     @JsonValue
     public String apiValue() {
-        return name().toLowerCase();
+        return name().toLowerCase(Locale.ROOT);
     }
 
     @JsonCreator

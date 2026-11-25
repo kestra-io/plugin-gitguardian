@@ -63,4 +63,22 @@ class CreateIncidentsTest {
         assertThat(output.getResults().getFirst().getFilename(), is("tickets.csv"));
         assertThat(output.getResults().getFirst().getPolicyBreaks().getFirst().getType(), is("Slack Bot Token"));
     }
+
+    @Test
+    void failsWhenResultCountDoesNotMatchDocuments(WireMockRuntimeInfo wireMock) {
+        stubFor(post(urlPathEqualTo("/v1/scan/create-incidents"))
+            .willReturn(okJson("""
+                [{"policy_break_count":0,"policies":[],"policy_breaks":[]},{"policy_break_count":0,"policies":[],"policy_breaks":[]}]
+                """)));
+
+        var task = CreateIncidents.builder()
+            .id(IdUtils.create()).type(CreateIncidents.class.getName())
+            .apiUrl(Property.ofValue(wireMock.getHttpBaseUrl())).apiKey(Property.ofValue("k"))
+            .sourceUuid(Property.ofValue("550e8400-e29b-41d4-a716-446655440000"))
+            .content(Property.ofValue("a"))
+            .build();
+
+        var exception = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> task.run(runContextFactory.of(Map.of())));
+        assertThat(exception.getMessage(), org.hamcrest.Matchers.containsString("2 results for 1 documents"));
+    }
 }
