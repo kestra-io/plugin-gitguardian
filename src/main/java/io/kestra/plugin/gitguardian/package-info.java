@@ -1,7 +1,7 @@
 @PluginSubGroup(
     title = "GitGuardian",
-    description = "GitGuardian plugin for Kestra",
-    categories = PluginSubGroup.PluginCategory.DATA
+    description = "Tasks and triggers for scanning content for secrets, triaging secret incidents, and reacting to new findings with the GitGuardian API.",
+    categories = PluginSubGroup.PluginCategory.BUSINESS
 )
 package io.kestra.plugin.gitguardian;
 

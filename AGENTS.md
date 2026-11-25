@@ -3,45 +3,83 @@
 ## What
 
 - Provides plugin components under `io.kestra.plugin.gitguardian`.
-- Includes classes such as `Example`, `Trigger`.
+- `scan.Scan` scans inline content and internal storage files for secrets via `POST /v1/scan` and `POST /v1/multiscan`.
+- `incidents.Trigger` polls `GET /v1/incidents/secrets` and fires one execution per poll with the new incidents, capped by `maxItemsPerPoll` (KV watermark); `incidents.List` / `Get` read incidents; `Assign`, `Update`, `AddNote`, `Ignore`, `Reopen`, `Resolve` write them.
+- `scan.CreateIncidents` + `sources.CreateCustomSource` register incidents for non-VCS data; `sources.List` / `Get` / `Scan` manage the perimeter.
+- `honeytokens.Create` (value returned as `EncryptedString`) / `Get` / `List` / `Revoke` / `Reset` and `honeytokens.Trigger` (one execution per poll with the oldest new events, capped by `maxItemsPerPoll`, and their honeytokens; the events endpoint has no date filter, so each poll reads newest first back to one hour behind the newest delivered event and dedupes by delivered event ID, so a use reported late is still delivered).
+- `auditlogs.List` / `Trigger` (one execution per poll with the oldest new events, capped by `maxItemsPerPoll`; the API cannot sort, so each poll reads every event of a window of at most one day after the watermark, then delivers the oldest) and `healthchecks.List` / `Run` / `Trigger` (batch, one fire per failure streak, tracked as a KV set of delivered `type:instance@firstStartedAt` keys).
+- `teams.List`, `members.List`: read-only lookups.
+- `publicincidents.*`: Public Monitoring twin of `incidents` (path `/v1/public-incidents/secrets`; ignore/resolve take comma-separated reasons; severity and custom tags are separate `set_*` POSTs). IDs are not interchangeable with internal incidents.
+- `webhooks.Receive`: pairs with the core `Webhook` trigger; HMAC-SHA256 keyed `Timestamp` header + signature token over the raw JSON. Kestra 2.0.9 hands the body parsed, so verification tries Python `json.dumps` formatting and compact JSON; `rawBody` enables a strict check.
 
 ## Why
 
-- What user problem does this solve? Teams need a concrete starting point for building and validating new Kestra plugins without recreating the same project scaffolding from scratch.
-- Why would a team adopt this plugin in a workflow? It gives plugin authors a ready-made reference repo they can adapt alongside their own build, test, and publishing workflow.
-- What operational/business outcome does it enable? It shortens plugin delivery time, reduces setup mistakes, and makes internal or partner plugin development more repeatable.
+- What user problem does this solve? Kestra flows move data, configuration and code between systems, so a leaked credential in a flow output or artifact propagates downstream; and security teams triage GitGuardian incidents by hand across ticketing and chat tools.
+- Why would a team adopt this plugin in a workflow? `Scan` stops a flow before secrets leave it, and the incident, honeytoken, audit-log and health-check triggers and tasks let Kestra drive triage (notify, ticket, assign, resolve, revoke) instead of custom scripts against the GitGuardian API.
+- What operational/business outcome does it enable? Fewer leaked secrets reaching downstream systems, faster and consistent remediation, and an auditable record of every automated incident action.
 
 ## How
 
 ### Architecture
 
-Single-module plugin. Source packages under `io.kestra.plugin`:
+Single-module plugin. Source packages under `io.kestra.plugin.gitguardian`:
 
-- `gitguardian`
+- root: `GitGuardianConnectionInterface` (shared property wording), `AbstractGitGuardianTask` / `AbstractGitGuardianTrigger` (connection properties, client factory; the trigger base also owns the `maxItemsPerPoll` cap and the KV `Watermark` = newest delivered timestamp + boundary IDs, plus the shared collect / cap / advance helpers), `AbstractIncidentTrigger` (shared poll loop of `incidents.Trigger` and `publicincidents.Trigger`), `GitGuardianClient` (Kestra `HttpClient` wrapper: `Authorization: Token`, `Link`-header cursor pagination, 429 retry, error mapping), `GitGuardianApiException`, `GitGuardianPage`.
+- `scan`: `Scan` and `CreateIncidents` share `AbstractScan` (`content`, `filename`, `files`); `ScanResult` / `PolicyBreak` / `PolicyBreakMatch` response models.
+- `honeytokens`: `Get` / `Reset` / `Revoke` share `AbstractHoneytokenAction` (`honeytokenId`, empty-response guard). `Orderings` maps `*_DESC` enum constants (`IncidentOrdering`, `HoneytokenOrdering`, `SourceOrdering`, `MemberOrdering`) to the API form `-field`, and parses either form in any casing.
+- `incidents`: `Trigger`, `List`, `Get`, and the write tasks sharing `AbstractIncidentAction` (`incidentId`, `incidents:write`); `Incident` / `Detector` / `CustomTag` / `IncidentNote` models; `Severity` / `IncidentStatus` / `Validity` / `IgnoreReason` enums.
+- `AbstractListTask` holds `maxResults` / `perPage` / `fetchType` and `list(...)` for every list task; `ListRunner` implements the `fetchType` contract (FETCH / FETCH_ONE / STORE / NONE + `maxResults`) once for every list task; each task keeps its own typed `Output` so generated docs stay typed.
+- Property names `type` and `description` are reserved by `Task`; use `integrationType`, `sourceType`, `honeytokenType`, `sourceDescription`, `honeytokenDescription`.
+- Watermark IDs are strings (`Watermark.boundaryIds`) so incident IDs (long), event UUIDs and `type:instanceId` keys all fit.
+- All sub-groups use `PluginSubGroup.PluginCategory.BUSINESS`.
+
+Response models use `@JsonAlias("snake_case")` on camelCase fields so task outputs stay camelCase for Pebble expressions. Every model has `@JsonIgnoreProperties(ignoreUnknown = true)`. The `match` field of a policy break (the secret itself) is deliberately not mapped.
 
 Infrastructure dependencies (Docker Compose services):
 
-- `app`
+- `app`: local Kestra `v2.0.9` with `build/libs` mounted as `/app/plugins`.
 
 ### Key Plugin Classes
 
-- `io.kestra.plugin.gitguardian.Example`
+- `io.kestra.plugin.gitguardian.scan.Scan`, `io.kestra.plugin.gitguardian.scan.CreateIncidents`
+- `io.kestra.plugin.gitguardian.incidents.Trigger`, `List`, `Get`, `Assign`, `Update`, `AddNote`, `Ignore`, `Reopen`, `Resolve`
+- `io.kestra.plugin.gitguardian.publicincidents.Trigger`, `List`, `Get`, `Assign`, `Update`, `AddNote`, `Ignore`, `Reopen`, `Resolve`
+- `io.kestra.plugin.gitguardian.sources.CreateCustomSource`, `List`, `Get`, `Scan`
+- `io.kestra.plugin.gitguardian.honeytokens.Trigger`, `Create`, `Get`, `List`, `Revoke`, `Reset`
+- `io.kestra.plugin.gitguardian.auditlogs.Trigger`, `List`
+- `io.kestra.plugin.gitguardian.healthchecks.Trigger`, `List`, `Run`
+- `io.kestra.plugin.gitguardian.teams.List`, `io.kestra.plugin.gitguardian.members.List`
+- `io.kestra.plugin.gitguardian.webhooks.Receive`
+
+### Build and test
+
+- JDK 25 (Kestra 2.0 baseline); `kestraVersion` in `gradle.properties`.
+- Tests use WireMock (`@WireMockTest`) with `@KestraTest`; `RunnerTest` runs the sanity-check flows in `src/test/resources/flows/sanity-checks` against WireMock on port 18099 (fixed because the flow YAML files hard-code the URL); `TriggerTest` drives `eval()` through `TestsUtils.mockTrigger(...).getValue().context()`.
+- `LiveApiTest` runs only when `GITGUARDIAN_API_KEY` is set and is read-only against the real API (scan of a doc example, list then get). `LiveWriteApiTest` additionally needs `GITGUARDIAN_LIVE_WRITE=true` and creates a custom source, an incident and a revoked honeytoken named `kestra-plugin-live-test-*` in the workspace.
+- `src/test/resources/application.yml` disables the gRPC server and randomizes the controller port, mirroring Kestra's own test configuration.
 
 ### Project Structure
 
 ```
 plugin-gitguardian/
 ├── src/main/java/io/kestra/plugin/gitguardian/
+│   ├── scan/  incidents/  publicincidents/  sources/  honeytokens/
+│   ├── auditlogs/  healthchecks/  teams/  members/  webhooks/
+├── src/main/resources/{metadata,icons,doc}/
 ├── src/test/java/io/kestra/plugin/gitguardian/
+├── src/test/resources/flows/sanity-checks/
 ├── build.gradle
 └── README.md
 ```
 
 ## Local rules
 
-- Base the wording on the implemented packages and classes, not on template README text.
+- Follow the Kestra plugin contribution guidelines: `Property<T>` everywhere, `@PluginProperty(group = ...)` on every property, `secret = true` plus `@ToString.Exclude` / `@EqualsAndHashCode.Exclude` on secrets, one unconditional WireMock happy-path test per task.
+- Never output or log a secret value returned by the GitGuardian API.
+- Package names follow the GitGuardian API resource (`scan`, `incidents`, `honeytokens`, `sources`); never create a package named `tasks`.
 
 ## References
 
 - https://kestra.io/docs/plugin-developer-guide
 - https://kestra.io/docs/plugin-developer-guide/contribution-guidelines
+- https://api.gitguardian.com/docs

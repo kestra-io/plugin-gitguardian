@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   app:
     build:
@@ -8,6 +6,11 @@ services:
     command: server local
     ports:
       - "8080:8080"
+    environment:
+      # Put the base64-encoded GitGuardian token in a local, git-ignored `.env` file:
+      #   SECRET_GITGUARDIAN_API_KEY=$(printf '%s' "$TOKEN" | base64)
+      # Flows then reference it as {{ secret('GITGUARDIAN_API_KEY') }}.
+      SECRET_GITGUARDIAN_API_KEY: ${SECRET_GITGUARDIAN_API_KEY:-}
     volumes:
       - ./build/libs/:/app/plugins/
     # works around "Unable to create JFR repository directory using base
