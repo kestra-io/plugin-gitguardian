@@ -25,6 +25,9 @@ import lombok.experimental.SuperBuilder;
     title = "Get a GitGuardian source",
     description = """
         Fetches one monitored source by ID from `GET /v1/sources/{id}`, including its `lastScan` status. \
+        The ID must belong to a source already returned by `sources.List`: custom sources created with \
+        `CreateCustomSource` are not returned by this endpoint (404), so create the source in the GitGuardian \
+        dashboard first, see [Bring Your Own Sources](https://docs.gitguardian.com/internal-monitoring/integrate-sources/bring-your-own-sources). \
         Requires the `sources:read` scope.
         """
 )

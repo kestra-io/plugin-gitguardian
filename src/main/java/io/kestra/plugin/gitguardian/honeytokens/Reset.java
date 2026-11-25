@@ -27,7 +27,8 @@ import lombok.experimental.SuperBuilder;
     description = """
         Resets a triggered honeytoken to active via `POST /v1/honeytokens/{id}/reset` and closes its events, \
         once the investigation is over and the decoy should keep watching. Use `Revoke` instead when the \
-        honeytoken is compromised beyond reuse. Requires the `honeytokens:write` scope.
+        honeytoken is compromised beyond reuse. Only applies after the honeytoken has triggered: the API \
+        answers 400 for a honeytoken that has not. Requires the `honeytokens:write` scope.
         """
 )
 @Plugin(

@@ -155,7 +155,7 @@ namespace: company.data
 tasks:
   - id: export
     type: io.kestra.plugin.jdbc.postgresql.CopyOut
-    url: jdbc:postgresql://warehouse:5432/analytics
+    url: jdbc:postgresql://db.example.invalid:5432/analytics
     username: "{{ secret('PG_USER') }}"
     password: "{{ secret('PG_PASSWORD') }}"
     sql: SELECT id, notes FROM support_tickets WHERE updated_at > now() - interval '1 day'
