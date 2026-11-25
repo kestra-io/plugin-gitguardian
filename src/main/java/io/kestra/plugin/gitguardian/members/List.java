@@ -67,9 +67,9 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @PluginProperty(group = "processing")
     private Property<Boolean> active;
 
-    @Schema(title = "Ordering", description = "`created_at` or `last_login`; prefix with `-` for descending.")
+    @Schema(title = "Ordering", description = "`CREATED_AT` or `LAST_LOGIN`; add the `_DESC` suffix (or write the API form, for example `-last_login`) for descending.")
     @PluginProperty(group = "processing")
-    private Property<String> ordering;
+    private Property<MemberOrdering> ordering;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -77,7 +77,7 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
         query.put("search", runContext.render(search).as(String.class).orElse(null));
         query.put("role", runContext.render(role).as(String.class).orElse(null));
         query.put("active", runContext.render(active).as(Boolean.class).orElse(null));
-        query.put("ordering", runContext.render(ordering).as(String.class).orElse(null));
+        query.put("ordering", runContext.render(ordering).as(MemberOrdering.class).map(MemberOrdering::apiValue).orElse(null));
 
         try (var client = client(runContext)) {
             var result = list(runContext, client, "/members", query, SCOPE, Member.class);

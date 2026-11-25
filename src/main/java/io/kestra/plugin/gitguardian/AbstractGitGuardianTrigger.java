@@ -94,7 +94,7 @@ public abstract class AbstractGitGuardianTrigger extends AbstractTrigger impleme
 
     /** Length-prefixed so distinct (flowId, triggerId) pairs never produce the same key. */
     protected String watermarkKey(String prefix, String flowId, String triggerId) {
-        return prefix + "_watermark_" + flowId.length() + "_" + flowId + "_" + triggerId.length() + "_" + triggerId;
+        return "%s_watermark_%d_%s_%d_%s".formatted(prefix, flowId.length(), flowId, triggerId.length(), triggerId);
     }
 
     protected Optional<Watermark> readWatermark(KVStore kv, String key) {

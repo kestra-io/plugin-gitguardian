@@ -84,7 +84,7 @@ public class Run extends AbstractGitGuardianTask implements RunnableTask<Run.Out
         runContext.logger().info("Running GitGuardian health check for {} instance {}", rType, rInstanceId);
 
         try (var client = client(runContext)) {
-            var response = client.post("/health-checks/" + GitGuardianClient.segment(rType) + "/" + rInstanceId + "/trigger", null, SCOPE, Response.class);
+            var response = client.post("/health-checks/%s/%s/trigger".formatted(GitGuardianClient.segment(rType), rInstanceId), null, SCOPE, Response.class);
             return Output.builder()
                 .detail(response != null ? response.getDetail() : null)
                 .resultUrl(response != null ? response.getResultUrl() : null)

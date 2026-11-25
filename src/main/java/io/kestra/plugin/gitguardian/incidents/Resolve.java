@@ -72,7 +72,7 @@ public class Resolve extends AbstractIncidentAction implements RunnableTask<Reso
         runContext.logger().info("Resolving GitGuardian incident {} (secret revoked: {})", rIncidentId, rSecretRevoked);
 
         try (var client = client(runContext)) {
-            var incident = client.post(incidentPath(rIncidentId) + "/resolve", Map.of("secret_revoked", rSecretRevoked), WRITE_SCOPE, Incident.class);
+            var incident = client.post(incidentPath(rIncidentId, "resolve"), Map.of("secret_revoked", rSecretRevoked), WRITE_SCOPE, Incident.class);
             return Output.builder().incident(requireIncident(incident, rIncidentId)).build();
         }
     }

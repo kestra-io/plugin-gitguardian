@@ -10,7 +10,6 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.plugin.gitguardian.AbstractGitGuardianTask;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -82,7 +81,7 @@ import java.util.Map;
         @Metric(name = "documents", type = Counter.TYPE, description = "Number of documents scanned.")
     }
 )
-public class CreateIncidents extends AbstractGitGuardianTask implements RunnableTask<CreateIncidents.Output> {
+public class CreateIncidents extends AbstractScan implements RunnableTask<CreateIncidents.Output> {
     private static final String SCOPE = "scan:create-incidents";
     /** 1 MB request limit minus headroom for JSON escaping, filenames, locations and the envelope. */
     static final int MAX_BATCH_BYTES = 900 * 1024;
@@ -91,19 +90,6 @@ public class CreateIncidents extends AbstractGitGuardianTask implements Runnable
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> sourceUuid;
-
-    @Schema(title = "Inline content to scan", description = "Scanned as one document named after `filename`.")
-    @PluginProperty(group = "main")
-    private Property<String> content;
-
-    @Schema(title = "File name for the inline content", description = "Defaults to `content`.")
-    @Builder.Default
-    @PluginProperty(group = "main")
-    private Property<String> filename = Property.ofValue("content");
-
-    @Schema(title = "Internal storage files to scan", description = "List of `kestra://` URIs, each scanned as one document named after the last segment of its URI, at most 1 MB each.")
-    @PluginProperty(group = "main")
-    private Property<List<String>> files;
 
     @Schema(title = "URL shown on the created occurrences", description = "Where the scanned data can be found, for example a warehouse table or bucket URL.")
     @PluginProperty(group = "advanced")
@@ -120,18 +106,9 @@ public class CreateIncidents extends AbstractGitGuardianTask implements Runnable
         var rLocationUrl = runContext.render(locationUrl).as(String.class).orElse(null);
         var rAuthorEmail = runContext.render(authorEmail).as(String.class).orElse(null);
 
-        var documents = new ArrayList<Map<String, Object>>();
-        var rContent = runContext.render(content).as(String.class).orElse(null);
-        if (rContent != null) {
-            documents.add(document(runContext.render(filename).as(String.class).orElse("content"), rContent, rLocationUrl, rAuthorEmail));
-        }
-        for (var file : runContext.render(files).asList(String.class)) {
-            var loaded = ScanFiles.read(runContext, file, MAX_BATCH_BYTES);
-            documents.add(document(loaded.name(), loaded.body(), rLocationUrl, rAuthorEmail));
-        }
-        if (documents.isEmpty()) {
-            throw new IllegalArgumentException("Nothing to scan: set content, files, or both.");
-        }
+        var documents = inputs(runContext, MAX_BATCH_BYTES).stream()
+            .map(input -> document(input.name(), input.body(), rLocationUrl, rAuthorEmail))
+            .toList();
 
         var results = new ArrayList<ScanResult>();
         try (var client = client(runContext)) {
@@ -154,14 +131,17 @@ public class CreateIncidents extends AbstractGitGuardianTask implements Runnable
                         results.add(result);
                     }
                 } else {
+                    if (batch.size() != 1) {
+                        throw new IllegalStateException("GitGuardian returned 1 result for %d documents.".formatted(batch.size()));
+                    }
                     var result = mapper.treeToValue(node, ScanResult.class);
-                    result.setFilename(batch.size() == 1 ? String.valueOf(batch.getFirst().get("filename")) : batch.size() + " documents");
+                    result.setFilename(String.valueOf(batch.getFirst().get("filename")));
                     results.add(result);
                 }
             }
         }
 
-        var policyBreakCount = results.stream().mapToInt(result -> result.getPolicyBreakCount() != null ? result.getPolicyBreakCount() : 0).sum();
+        var policyBreakCount = policyBreakCount(results);
         runContext.metric(Counter.of("documents", documents.size()));
         runContext.metric(Counter.of("policy.breaks", policyBreakCount));
         runContext.logger().info("GitGuardian scanned {} document(s) for custom source {} and reported {} policy break(s) as incidents", documents.size(), rSourceUuid, policyBreakCount);

@@ -78,7 +78,7 @@ public class AddNote extends AbstractIncidentAction implements RunnableTask<AddN
         runContext.logger().info("Adding a note to GitGuardian incident {}", rIncidentId);
 
         try (var client = client(runContext)) {
-            var note = client.post(incidentPath(rIncidentId) + "/notes", Map.of("comment", rComment), WRITE_SCOPE, IncidentNote.class);
+            var note = client.post(incidentPath(rIncidentId, "notes"), Map.of("comment", rComment), WRITE_SCOPE, IncidentNote.class);
             if (note == null) {
                 throw new IllegalStateException("Empty response from the GitGuardian API when adding a note to incident %d.".formatted(rIncidentId));
             }

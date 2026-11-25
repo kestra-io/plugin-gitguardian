@@ -8,7 +8,6 @@ import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
-import io.kestra.plugin.gitguardian.AbstractGitGuardianTask;
 import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
@@ -95,23 +94,10 @@ import java.util.Map;
         @Metric(name = "documents", type = Counter.TYPE, description = "Number of documents scanned.")
     }
 )
-public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.Output> {
+public class Scan extends AbstractScan implements RunnableTask<Scan.Output> {
     static final int MAX_DOCUMENTS_PER_REQUEST = 20;
     static final int MAX_DOCUMENT_BYTES = 1024 * 1024;
     private static final String SCOPE = "scan";
-
-    @Schema(title = "Inline content to scan", description = "Scanned as one document named after `filename`. Use `files` to scan files from internal storage instead of, or in addition to, inline content.")
-    @PluginProperty(group = "main")
-    private Property<String> content;
-
-    @Schema(title = "File name for the inline content", description = "Helps GitGuardian detectors that rely on file context (for example `.env` or `id_rsa`). Defaults to `content`.")
-    @Builder.Default
-    @PluginProperty(group = "main")
-    private Property<String> filename = Property.ofValue("content");
-
-    @Schema(title = "Internal storage files to scan", description = "List of `kestra://` URIs, typically outputs of previous tasks. Each file is scanned as one document named after the last segment of its URI and must be at most 1 MB.")
-    @PluginProperty(group = "main")
-    private Property<List<String>> files;
 
     @Schema(title = "Fail the task when at least one policy break is found", description = "Defaults to `true`. When `false`, the task succeeds and downstream tasks decide what to do with `policyBreakCount` and `results`.")
     @Builder.Default
@@ -121,9 +107,6 @@ public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.O
     @Override
     public Output run(RunContext runContext) throws Exception {
         var documents = documents(runContext);
-        if (documents.isEmpty()) {
-            throw new IllegalArgumentException("Nothing to scan: set content, files, or both.");
-        }
 
         var results = new ArrayList<ScanResult>();
         try (var client = client(runContext)) {
@@ -144,7 +127,7 @@ public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.O
             }
         }
 
-        var policyBreakCount = results.stream().mapToInt(result -> result.getPolicyBreakCount() != null ? result.getPolicyBreakCount() : 0).sum();
+        var policyBreakCount = policyBreakCount(results);
         runContext.metric(Counter.of("documents", results.size()));
         runContext.metric(Counter.of("policy.breaks", policyBreakCount));
 
@@ -155,7 +138,7 @@ public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.O
                     result.getFilename(),
                     policyBreak.getType(),
                     policyBreak.getValidity() != null ? policyBreak.getValidity().apiValue() : "unknown",
-                    Boolean.TRUE.equals(policyBreak.getKnownSecret()) ? ", known incident " + policyBreak.getIncidentUrl() : ""
+                    Boolean.TRUE.equals(policyBreak.getKnownSecret()) ? ", known incident %s".formatted(policyBreak.getIncidentUrl()) : ""
                 );
             }
         }
@@ -173,19 +156,7 @@ public class Scan extends AbstractGitGuardianTask implements RunnableTask<Scan.O
     }
 
     private List<Map<String, String>> documents(RunContext runContext) throws Exception {
-        var documents = new ArrayList<Map<String, String>>();
-
-        var rContent = runContext.render(content).as(String.class).orElse(null);
-        if (rContent != null) {
-            var rFilename = runContext.render(filename).as(String.class).orElse("content");
-            documents.add(document(rFilename, rContent));
-        }
-
-        for (var file : runContext.render(files).asList(String.class)) {
-            var loaded = ScanFiles.read(runContext, file, MAX_DOCUMENT_BYTES);
-            documents.add(document(loaded.name(), loaded.body()));
-        }
-        return documents;
+        return inputs(runContext, MAX_DOCUMENT_BYTES).stream().map(input -> document(input.name(), input.body())).toList();
     }
 
     private static Map<String, String> document(String name, String body) {

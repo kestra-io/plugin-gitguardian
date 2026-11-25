@@ -43,8 +43,8 @@ import java.util.LinkedHashMap;
                   - id: list
                     type: io.kestra.plugin.gitguardian.honeytokens.List
                     apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
-                    status: triggered
-                    ordering: "-triggered_at"
+                    status: TRIGGERED
+                    ordering: TRIGGERED_AT_DESC
                 """
         )
     }
@@ -52,9 +52,9 @@ import java.util.LinkedHashMap;
 public class List extends AbstractListTask implements RunnableTask<List.Output> {
     private static final String SCOPE = "honeytokens:read";
 
-    @Schema(title = "Only this status", description = "`active`, `triggered`, or `revoked`.")
+    @Schema(title = "Only this status", description = "`ACTIVE`, `TRIGGERED`, or `REVOKED`.")
     @PluginProperty(group = "processing")
-    private Property<String> status;
+    private Property<HoneytokenStatus> status;
 
     @Schema(title = "Only this type", description = "Currently `AWS`.")
     @PluginProperty(group = "processing")
@@ -68,19 +68,19 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @PluginProperty(group = "processing")
     private Property<java.util.List<String>> tags;
 
-    @Schema(title = "Ordering", description = "`created_at`, `triggered_at`, `revoked_at`, or `name`; prefix with `-` for descending.")
+    @Schema(title = "Ordering", description = "`CREATED_AT`, `TRIGGERED_AT`, `REVOKED_AT`, or `NAME`; add the `_DESC` suffix (or write the API form, for example `-triggered_at`) for descending.")
     @PluginProperty(group = "processing")
-    private Property<String> ordering;
+    private Property<HoneytokenOrdering> ordering;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
         var query = new LinkedHashMap<String, Object>();
-        query.put("status", runContext.render(status).as(String.class).orElse(null));
+        query.put("status", runContext.render(status).as(HoneytokenStatus.class).map(HoneytokenStatus::apiValue).orElse(null));
         query.put("type", runContext.render(honeytokenType).as(String.class).orElse(null));
         query.put("search", runContext.render(search).as(String.class).orElse(null));
         var rTags = runContext.render(tags).asList(String.class);
         query.put("tags", rTags.isEmpty() ? null : rTags);
-        query.put("ordering", runContext.render(ordering).as(String.class).orElse(null));
+        query.put("ordering", runContext.render(ordering).as(HoneytokenOrdering.class).map(HoneytokenOrdering::apiValue).orElse(null));
         query.put("show_token", false);
 
         try (var client = client(runContext)) {

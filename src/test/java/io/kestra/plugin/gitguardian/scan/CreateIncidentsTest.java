@@ -65,6 +65,28 @@ class CreateIncidentsTest {
     }
 
     @Test
+    void failsWhenSingleResultAnswersSeveralDocuments(WireMockRuntimeInfo wireMock) throws Exception {
+        stubFor(post(urlPathEqualTo("/v1/scan/create-incidents"))
+            .willReturn(okJson("""
+                {"policy_break_count":0,"policies":[],"policy_breaks":[]}
+                """)));
+
+        var runContext = runContextFactory.of(Map.of());
+        var file = runContext.workingDir().createFile("b.txt", "b".getBytes(java.nio.charset.StandardCharsets.UTF_8)).toFile();
+        var uri = runContext.storage().putFile(file, "b.txt");
+        var task = CreateIncidents.builder()
+            .id(IdUtils.create()).type(CreateIncidents.class.getName())
+            .apiUrl(Property.ofValue(wireMock.getHttpBaseUrl())).apiKey(Property.ofValue("k"))
+            .sourceUuid(Property.ofValue("550e8400-e29b-41d4-a716-446655440000"))
+            .content(Property.ofValue("a"))
+            .files(Property.ofValue(java.util.List.of(uri.toString())))
+            .build();
+
+        var exception = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(exception.getMessage(), org.hamcrest.Matchers.containsString("1 result for 2 documents"));
+    }
+
+    @Test
     void failsWhenResultCountDoesNotMatchDocuments(WireMockRuntimeInfo wireMock) {
         stubFor(post(urlPathEqualTo("/v1/scan/create-incidents"))
             .willReturn(okJson("""

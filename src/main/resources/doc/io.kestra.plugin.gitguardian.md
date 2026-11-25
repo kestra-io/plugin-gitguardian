@@ -1,3 +1,5 @@
+# How to use the GitGuardian plugin
+
 GitGuardian detects hardcoded secrets in source code, files, and messages, and manages the resulting incidents. This plugin brings the [GitGuardian public API](https://api.gitguardian.com/docs) into Kestra flows.
 
 ## Authentication
@@ -6,18 +8,49 @@ Every task and trigger authenticates with an `apiKey`: a GitGuardian personal ac
 
 `apiUrl` defaults to the US region `https://api.gitguardian.com`. Use `https://api.eu1.gitguardian.com` for EU workspaces and `https://<instance>/exposed` for self-hosted GitGuardian.
 
-## Sub-groups
+## Tasks
 
-- **Secrets scanning** (`io.kestra.plugin.gitguardian.scan`): scan inline content or files from internal storage and fail the flow when a secret is found. Requires the `scan` scope.
-- **Secret incidents** (`io.kestra.plugin.gitguardian.incidents`): react to new incidents with a polling trigger, list and fetch incidents, and triage them (assign, update severity and custom tags, add notes, ignore, reopen, resolve). Requires `incidents:read`, plus `incidents:write` for the triage tasks.
+Shared conventions: every list task (`List`) takes `fetchType` (`FETCH`, `FETCH_ONE`, `STORE`, `NONE`), `maxResults` and `perPage`; use `STORE` for large result sets. `ordering` is an enum on the tasks that sort: write `DATE_DESC` or the API form `-date`, in any casing. Write tasks never return secret values, except `honeytokens.Create`, which returns the decoy encrypted.
 
-- **Public Monitoring incidents** (`io.kestra.plugin.gitguardian.publicincidents`): same trigger, read and triage tasks for secrets leaked on the public perimeter. Scopes `incidents:read`, `incidents:write`.
-- **Webhooks** (`io.kestra.plugin.gitguardian.webhooks`): `Receive` verifies and parses custom webhook events delivered through Kestra's core `Webhook` trigger. No scope.
-- **Sources** (`io.kestra.plugin.gitguardian.sources`): list and fetch monitored sources, launch historical scans, create custom sources. Scopes `sources:read`, `sources:scan`, `sources:write`.
-- **Honeytokens** (`io.kestra.plugin.gitguardian.honeytokens`): create (value returned encrypted), list, get, revoke, and a trigger on honeytoken events. Scopes `honeytokens:read`, `honeytokens:write`.
-- **Audit logs** (`io.kestra.plugin.gitguardian.auditlogs`): export entries and react to sensitive actions. Scope `audit_logs:read`.
-- **Health checks** (`io.kestra.plugin.gitguardian.healthchecks`): list, re-run, and react when an integration starts failing. Scopes `health_checks:read`, `health_checks:write`.
-- **Teams and members** (`io.kestra.plugin.gitguardian.teams`, `.members`): read-only lookups for routing and audits. Scopes `teams:read`, `members:read`.
+### Secrets scanning (`scan`)
+
+- `scan.Scan`: scans `content` (named after `filename`) and/or `files` (`kestra://` URIs). Documents are at most 1 MB. Fails when a secret is found unless `failOnPolicyBreak: false`. Scope `scan`.
+- `scan.CreateIncidents`: same inputs plus required `sourceUuid`, optional `locationUrl` and `authorEmail`; records the secrets as incidents on a custom source. The endpoint is in beta. Scope `scan:create-incidents`.
+
+### Secret incidents (`incidents`, `publicincidents`)
+
+- `List` (filters: `status`, `severity`, `validity`, `dateAfter`, `dateBefore`, `detectorGroupName`, `assigneeEmail`, `tags`, `riskScoreMin`, `ordering`) and `Get` (`incidentId`).
+- Triage tasks, all with `incidentId`: `Assign` (`assigneeEmail` or `assigneeMemberId`, `sendEmail`), `Update` (`severity`, `customTags`), `AddNote` (`comment`), `Ignore`, `Reopen`, `Resolve`.
+- `publicincidents` mirrors `incidents` for the Public Monitoring perimeter. Its IDs are not interchangeable with internal incident IDs, `Ignore` and `Resolve` take comma-separated reason lists (`ignoreReasons`, `resolveReasons`), and `Update` makes separate calls for severity and custom tags.
+- Scopes `incidents:read` for reads, `incidents:write` for triage.
+
+### Webhooks (`webhooks`)
+
+- `webhooks.Receive`: verifies the HMAC-SHA256 signature of a GitGuardian custom webhook delivered through the core `Webhook` trigger (`body`, `headers`, `signatureToken`, `maxClockSkew`, `failOnInvalidSignature`). Kestra hands the body parsed, so verification tries Python `json.dumps` formatting and compact JSON; set `rawBody` for a strict check. No scope.
+
+### Sources (`sources`)
+
+- `List` (`search`, `sourceType`, `health`, `visibility`, `sourceCriticality`, `monitoringStatuses`, `teamId`, `ordering`), `Get` (`sourceId`), `Scan` (`sourceIds`, starts a historical scan, beta), `CreateCustomSource` (`name`, `sourceDescription`). Scopes `sources:read`, `sources:scan`, `sources:write`.
+
+### Honeytokens (`honeytokens`)
+
+- `Create` (`name`, `honeytokenDescription`, `honeytokenType`, `customTags`): the value comes back in `encryptedToken` and the task fails before calling the API when `kestra.encryption.secret-key` is not configured, so no orphan decoy is left behind.
+- `List` (`status` enum, `honeytokenType`, `search`, `tags`, `ordering`), `Get`, `Reset` (only after the honeytoken triggered), `Revoke`, all by `honeytokenId`. Scopes `honeytokens:read`, `honeytokens:write`.
+
+### Audit logs, health checks, teams and members
+
+- `auditlogs.List`: filters `eventName`, `memberEmail`, `memberId`, `tokenId`, `ipAddress`, `dateAfter`, `dateBefore`. Scope `audit_logs:read`.
+- `healthchecks.List` and `healthchecks.Run` (`integrationType`, `instanceId`). Scopes `health_checks:read`, `health_checks:write`.
+- `teams.List` and `members.List`: read-only lookups for routing and audits. Scopes `teams:read`, `members:read`.
+
+## Triggers
+
+Every trigger authenticates like the tasks, polls at `interval` (default `PT5M`), starts one execution per poll and delivers at most `maxItemsPerPoll` items (default 100, maximum 1000), oldest first; the rest fire on the next polls. State lives in the flow namespace KV store and is seeded at the first poll, so only new items fire.
+
+- `incidents.Trigger` and `publicincidents.Trigger`: new or re-triggered incidents in `trigger.incidents` (filters `status`, `severity`, `validity`, `detectorGroupName`, `riskScoreMin`; `incidents.Trigger` also takes `tags`, `publicincidents.Trigger` also takes `declarativeSecretStatus`). Scope `incidents:read`.
+- `honeytokens.Trigger`: new honeytoken events in `trigger.events` and their honeytokens, without values, in `trigger.honeytokens`, with optional `honeytokenId`. Each poll reads one hour behind the newest delivered event and skips delivered IDs, so a use that GitGuardian reports late is still delivered. Scope `honeytokens:read`.
+- `auditlogs.Trigger`: new audit log entries in `trigger.events`, optionally filtered by `eventNames`. Scope `audit_logs:read`.
+- `healthchecks.Trigger`: integration instances that entered one of `statuses` (default `FAIL`, optionally filtered by `types`) in `trigger.checks`; one fire per failure streak. Scope `health_checks:read`.
 
 ## Typical flows
 

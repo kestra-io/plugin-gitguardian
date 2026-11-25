@@ -88,7 +88,7 @@ public class Assign extends AbstractPublicIncidentAction implements RunnableTask
         runContext.logger().info("Assigning GitGuardian public incident {}", rIncidentId);
 
         try (var client = client(runContext)) {
-            var incident = client.post(incidentPath(rIncidentId) + "/assign?send_email=" + runContext.render(sendEmail).as(Boolean.class).orElse(true), body, WRITE_SCOPE, PublicIncident.class);
+            var incident = client.post("%s?send_email=%s".formatted(incidentPath(rIncidentId, "assign"), runContext.render(sendEmail).as(Boolean.class).orElse(true)), body, WRITE_SCOPE, PublicIncident.class);
             return Output.builder().incident(requireIncident(incident, rIncidentId)).build();
         }
     }

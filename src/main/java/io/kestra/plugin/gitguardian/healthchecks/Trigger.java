@@ -63,7 +63,7 @@ import java.util.TreeSet;
                         "routing_key": "{{ secret('PAGERDUTY_KEY') }}",
                         "event_action": "trigger",
                         "payload": {
-                          "summary": "GitGuardian integration failing: {{ trigger.checks | jq('[.[].instance.name]') | first }}",
+                          "summary": "GitGuardian integration failing: {{ trigger.checks | jq('[.[].instance.name] | join(", ")') | first }}",
                           "source": "kestra",
                           "severity": "error"
                         }
@@ -103,7 +103,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
         var rTypes = runContext.render(types).asList(String.class);
 
         var state = readState(kv, key, DeliveredChecks.class).orElse(null);
-        var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
+        var rMaxItemsPerPoll = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
 
         var current = new LinkedHashMap<String, HealthCheck>();
         try (var client = client(runContext)) {
@@ -132,7 +132,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
         var undelivered = current.entrySet().stream().filter(entry -> !delivered.contains(entry.getKey())).toList();
         var batch = undelivered.stream()
             .sorted(Map.Entry.comparingByValue(Comparator.comparing(Trigger::streakStart)))
-            .limit(cap)
+            .limit(rMaxItemsPerPoll)
             .toList();
 
         // A new streak gets a new firstStartedAt, so forgetting keys of ended streaks is safe.
@@ -154,7 +154,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
 
     private static String streakKey(HealthCheck check) {
         var instanceId = check.getInstance() != null ? check.getInstance().getId() : check.getId();
-        return check.getType() + ":" + instanceId + "@" + streakStart(check);
+        return "%s:%s@%s".formatted(check.getType(), instanceId, streakStart(check));
     }
 
     /** Delivered `type:instanceId@firstStartedAt` keys of streaks still listed as matching. */

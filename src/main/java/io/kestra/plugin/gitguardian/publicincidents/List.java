@@ -7,6 +7,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.gitguardian.AbstractListTask;
+import io.kestra.plugin.gitguardian.incidents.IncidentOrdering;
 import io.kestra.plugin.gitguardian.incidents.IncidentStatus;
 import io.kestra.plugin.gitguardian.incidents.Severity;
 import io.kestra.plugin.gitguardian.incidents.Validity;
@@ -54,7 +55,7 @@ import java.util.Map;
                     apiKey: "{{ secret('GITGUARDIAN_API_KEY') }}"
                     status: TRIGGERED
                     validity: VALID
-                    ordering: "-date"
+                    ordering: DATE_DESC
                 """
         )
     }
@@ -102,9 +103,9 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @PluginProperty(group = "processing")
     private Property<@Min(0) @Max(100) Integer> riskScoreMin;
 
-    @Schema(title = "Ordering", description = "`date`, `resolved_at`, `ignored_at`, or `risk_score`; prefix with `-` for descending.")
+    @Schema(title = "Ordering", description = "`DATE`, `RESOLVED_AT`, `IGNORED_AT`, or `RISK_SCORE`; add the `_DESC` suffix (or write the API form, for example `-date`) for descending.")
     @PluginProperty(group = "processing")
-    private Property<String> ordering;
+    private Property<IncidentOrdering> ordering;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -120,7 +121,7 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
         var rTags = runContext.render(tags).asList(String.class);
         query.put("tags", rTags.isEmpty() ? null : rTags);
         query.put("risk_score_min", runContext.render(riskScoreMin).as(Integer.class).orElse(null));
-        query.put("ordering", runContext.render(ordering).as(String.class).orElse(null));
+        query.put("ordering", runContext.render(ordering).as(IncidentOrdering.class).map(IncidentOrdering::apiValue).orElse(null));
 
         try (var client = client(runContext)) {
             var result = list(runContext, client, "/public-incidents/secrets", query, SCOPE, PublicIncident.class);

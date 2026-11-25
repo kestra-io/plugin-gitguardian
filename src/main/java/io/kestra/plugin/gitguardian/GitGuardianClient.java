@@ -43,7 +43,7 @@ public final class GitGuardianClient implements Closeable {
     public GitGuardianClient(HttpClient httpClient, String apiUrl, String apiKey) {
         this.httpClient = httpClient;
         var normalized = apiUrl.endsWith("/") ? apiUrl.substring(0, apiUrl.length() - 1) : apiUrl;
-        this.apiBaseUrl = normalized.endsWith("/v1") ? normalized : normalized + "/v1";
+        this.apiBaseUrl = normalized.endsWith("/v1") ? normalized : "%s/v1".formatted(normalized);
         this.apiKey = apiKey;
     }
 
@@ -123,7 +123,7 @@ public final class GitGuardianClient implements Closeable {
         var builder = HttpRequest.builder()
             .method(method)
             .uri(buildUri(path, query))
-            .addHeader("Authorization", "Token " + apiKey)
+            .addHeader("Authorization", "Token %s".formatted(apiKey))
             .addHeader("Accept", "application/json")
             .addHeader("User-Agent", USER_AGENT);
 
@@ -152,9 +152,9 @@ public final class GitGuardianClient implements Closeable {
         }
         var params = query.entrySet().stream()
             .filter(entry -> entry.getValue() != null)
-            .map(entry -> encode(entry.getKey()) + "=" + encode(queryValue(entry.getValue())))
+            .map(entry -> "%s=%s".formatted(encode(entry.getKey()), encode(queryValue(entry.getValue()))))
             .collect(Collectors.joining("&"));
-        return URI.create(params.isEmpty() ? uri : uri + "?" + params);
+        return URI.create(params.isEmpty() ? uri : "%s?%s".formatted(uri, params));
     }
 
     private static String queryValue(Object value) {
@@ -244,7 +244,7 @@ public final class GitGuardianClient implements Closeable {
         } catch (IOException ignored) {
             // Not the {"detail": ...} envelope; fall through to the raw body.
         }
-        return body.length() > 500 ? body.substring(0, 500) + "..." : body;
+        return body.length() > 500 ? "%s...".formatted(body.substring(0, 500)) : body;
     }
 
     @Getter

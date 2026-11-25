@@ -82,7 +82,7 @@ public class Get extends AbstractGitGuardianTask implements RunnableTask<Get.Out
         runContext.logger().info("Fetching GitGuardian source {}", rSourceId);
 
         try (var client = client(runContext)) {
-            var source = client.get("/sources/" + rSourceId, null, SCOPE, Source.class);
+            var source = client.get("/sources/%s".formatted(rSourceId), null, SCOPE, Source.class);
             if (source == null) {
                 throw new IllegalStateException("Empty response from the GitGuardian API for source %d.".formatted(rSourceId));
             }

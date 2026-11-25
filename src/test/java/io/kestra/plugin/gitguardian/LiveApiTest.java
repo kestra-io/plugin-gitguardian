@@ -5,6 +5,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.gitguardian.incidents.Get;
+import io.kestra.plugin.gitguardian.incidents.IncidentOrdering;
 import io.kestra.plugin.gitguardian.incidents.List;
 import io.kestra.plugin.gitguardian.scan.Scan;
 import jakarta.inject.Inject;
@@ -76,7 +77,7 @@ class LiveApiTest {
             .type(List.class.getName())
             .apiUrl(apiUrl())
             .apiKey(apiKey())
-            .ordering(Property.ofValue("-date"))
+            .ordering(Property.ofValue(IncidentOrdering.DATE_DESC))
             .maxResults(Property.ofValue(3))
             .perPage(Property.ofValue(2))
             .build()

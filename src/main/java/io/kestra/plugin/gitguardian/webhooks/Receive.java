@@ -143,7 +143,7 @@ public class Receive extends Task implements RunnableTask<Receive.Output> {
             verified = failure == null;
             if (!verified) {
                 if (runContext.render(failOnInvalidSignature).as(Boolean.class).orElse(true)) {
-                    throw new IllegalStateException("GitGuardian webhook rejected: " + failure);
+                    throw new IllegalStateException("GitGuardian webhook rejected: %s".formatted(failure));
                 }
                 runContext.logger().warn("GitGuardian webhook signature check failed: {}", failure);
             }

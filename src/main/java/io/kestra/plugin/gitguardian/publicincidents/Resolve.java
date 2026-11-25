@@ -70,7 +70,7 @@ public class Resolve extends AbstractPublicIncidentAction implements RunnableTas
         runContext.logger().info("Resolving GitGuardian public incident {} as {}", rIncidentId, rReasons);
 
         try (var client = client(runContext)) {
-            var incident = client.post(incidentPath(rIncidentId) + "/resolve", Map.of("resolve_reason", String.join(",", rReasons)), WRITE_SCOPE, PublicIncident.class);
+            var incident = client.post(incidentPath(rIncidentId, "resolve"), Map.of("resolve_reason", String.join(",", rReasons)), WRITE_SCOPE, PublicIncident.class);
             return Output.builder().incident(requireIncident(incident, rIncidentId)).build();
         }
     }

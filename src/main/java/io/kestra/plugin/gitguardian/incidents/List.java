@@ -52,7 +52,7 @@ import java.util.Map;
                     status: TRIGGERED
                     severity: CRITICAL
                     validity: VALID
-                    ordering: "-date"
+                    ordering: DATE_DESC
                     maxResults: 50
 
                   - id: report
@@ -122,9 +122,9 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @PluginProperty(group = "processing")
     private Property<@Min(0) @Max(100) Integer> riskScoreMin;
 
-    @Schema(title = "Ordering", description = "`date`, `resolved_at`, `ignored_at`, or `risk_score`; prefix with `-` for descending. Defaults to GitGuardian's ordering (`date` ascending).")
+    @Schema(title = "Ordering", description = "`DATE`, `RESOLVED_AT`, `IGNORED_AT`, or `RISK_SCORE`; add the `_DESC` suffix (or write the API form, for example `-date`) for descending. Defaults to GitGuardian's ordering (`DATE` ascending).")
     @PluginProperty(group = "processing")
-    private Property<String> ordering;
+    private Property<IncidentOrdering> ordering;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -148,7 +148,7 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
         var rTags = runContext.render(tags).asList(String.class);
         query.put("tags", rTags.isEmpty() ? null : rTags);
         query.put("risk_score_min", runContext.render(riskScoreMin).as(Integer.class).orElse(null));
-        query.put("ordering", runContext.render(ordering).as(String.class).orElse(null));
+        query.put("ordering", runContext.render(ordering).as(IncidentOrdering.class).map(IncidentOrdering::apiValue).orElse(null));
         return query;
     }
 

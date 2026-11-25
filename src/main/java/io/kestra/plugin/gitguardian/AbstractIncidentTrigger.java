@@ -68,13 +68,13 @@ public abstract class AbstractIncidentTrigger<T> extends AbstractGitGuardianTrig
             query.put("ordering", "date");
             query.put("per_page", PAGE_SIZE);
             query.put("date_after", watermark.getTimestamp().minus(OVERLAP).toString());
-            var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
-            var undelivered = collectUndelivered(client, path(), query, SCOPE, itemType(), watermark, cap, this::dateOf, this::idOf, logger);
+            var rMaxItemsPerPoll = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
+            var undelivered = collectUndelivered(client, path(), query, SCOPE, itemType(), watermark, rMaxItemsPerPoll, this::dateOf, this::idOf, logger);
             if (undelivered.isEmpty()) {
                 return Optional.empty();
             }
 
-            var batch = oldest(undelivered, cap, this::dateOf, this::idOf);
+            var batch = oldest(undelivered, rMaxItemsPerPoll, this::dateOf, this::idOf);
             persistWatermark(kv, key, advance(watermark, batch, this::dateOf, this::idOf));
             return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, output(batch)));
         }

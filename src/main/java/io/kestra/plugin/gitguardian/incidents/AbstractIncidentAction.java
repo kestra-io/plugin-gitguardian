@@ -32,7 +32,11 @@ public abstract class AbstractIncidentAction extends AbstractGitGuardianTask {
     }
 
     protected String incidentPath(long rIncidentId) {
-        return "/incidents/secrets/" + rIncidentId;
+        return "/incidents/secrets/%d".formatted(rIncidentId);
+    }
+
+    protected String incidentPath(long rIncidentId, String action) {
+        return "%s/%s".formatted(incidentPath(rIncidentId), action);
     }
 
     protected static Incident requireIncident(Incident incident, long rIncidentId) {

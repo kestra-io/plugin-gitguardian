@@ -70,7 +70,7 @@ public class Ignore extends AbstractPublicIncidentAction implements RunnableTask
         runContext.logger().info("Ignoring GitGuardian public incident {} as {}", rIncidentId, rReasons);
 
         try (var client = client(runContext)) {
-            var incident = client.post(incidentPath(rIncidentId) + "/ignore", Map.of("ignore_reason", String.join(",", rReasons)), WRITE_SCOPE, PublicIncident.class);
+            var incident = client.post(incidentPath(rIncidentId, "ignore"), Map.of("ignore_reason", String.join(",", rReasons)), WRITE_SCOPE, PublicIncident.class);
             return Output.builder().incident(requireIncident(incident, rIncidentId)).build();
         }
     }

@@ -2,14 +2,9 @@ package io.kestra.plugin.gitguardian.honeytokens;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
-import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
-import io.kestra.plugin.gitguardian.AbstractGitGuardianTask;
-import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -56,28 +51,13 @@ import lombok.experimental.SuperBuilder;
         )
     }
 )
-public class Get extends AbstractGitGuardianTask implements RunnableTask<Get.Output> {
+public class Get extends AbstractHoneytokenAction implements RunnableTask<Get.Output> {
     private static final String SCOPE = "honeytokens:read";
-
-    @Schema(title = "Honeytoken ID")
-    @NotNull
-    @PluginProperty(group = "main")
-    private Property<String> honeytokenId;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rId = runContext.render(honeytokenId).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("honeytokenId is required to fetch a GitGuardian honeytoken."));
-
-        runContext.logger().info("Fetching GitGuardian honeytoken {}", rId);
-
-        try (var client = client(runContext)) {
-            var honeytoken = client.get("/honeytokens/" + GitGuardianClient.segment(rId), null, SCOPE, Honeytoken.class);
-            if (honeytoken == null) {
-                throw new IllegalStateException("Empty response from the GitGuardian API for honeytoken %s.".formatted(rId));
-            }
-            return Output.builder().honeytoken(honeytoken).build();
-        }
+        var honeytoken = perform(runContext, "fetch", (client, path) -> client.get(path, null, SCOPE, Honeytoken.class));
+        return Output.builder().honeytoken(honeytoken).build();
     }
 
     @Builder

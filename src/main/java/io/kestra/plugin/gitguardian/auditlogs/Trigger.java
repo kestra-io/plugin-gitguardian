@@ -101,7 +101,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
         var now = Instant.now();
         var windowEnd = watermark.getTimestamp().plus(MAX_WINDOW);
         var windowed = windowEnd.isBefore(now.minus(getInterval()));
-        var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
+        var rMaxItemsPerPoll = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
         var undelivered = new ArrayList<AuditLog>();
         try (var client = client(runContext)) {
             var names = rEventNames.isEmpty() ? Collections.<String>singletonList(null) : rEventNames;
@@ -126,7 +126,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
             }
             return Optional.empty();
         }
-        var batch = oldest(undelivered, cap, AuditLog::getDate, event -> String.valueOf(event.getId()));
+        var batch = oldest(undelivered, rMaxItemsPerPoll, AuditLog::getDate, event -> String.valueOf(event.getId()));
         persistWatermark(kv, key, advance(watermark, batch, AuditLog::getDate, event -> String.valueOf(event.getId())));
 
         return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().events(batch).count(batch.size()).build()));

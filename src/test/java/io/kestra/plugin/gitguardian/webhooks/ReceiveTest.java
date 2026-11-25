@@ -184,6 +184,25 @@ class ReceiveTest {
     }
 
     @Test
+    void rejectsEventFarFromExecutionStartEvenWhenItIsFreshAgainstNow() throws Exception {
+        var timestamp = Instant.now().toString();
+        var payload = pythonPayload(timestamp);
+
+        // A fresh event would pass the Instant.now() fallback: only the execution start date can reject it.
+        var task = Receive.builder()
+            .id(IdUtils.create()).type(Receive.class.getName())
+            .body(Property.ofValue(parsed(payload)))
+            .headers(Property.ofValue(Map.of("Gitguardian-Signature", List.of(sign(timestamp, payload)), "Timestamp", List.of(timestamp))))
+            .signatureToken(Property.ofValue(TOKEN))
+            .build();
+        var startedLongBefore = Instant.now().minus(Duration.ofHours(1)).toString();
+
+        var exception = assertThrows(IllegalStateException.class, () -> task.run(runContextFactory.of(Map.of("execution", Map.of("startDate", startedLongBefore)))));
+
+        assertThat(exception.getMessage(), containsString("possible replay"));
+    }
+
+    @Test
     void outputsComeFromRawBodyWhenBothAreSet() throws Exception {
         var timestamp = Instant.now().toString();
         var payload = pythonPayload(timestamp);

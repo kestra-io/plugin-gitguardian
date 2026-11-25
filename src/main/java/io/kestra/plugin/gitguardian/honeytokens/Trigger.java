@@ -1,5 +1,6 @@
 package io.kestra.plugin.gitguardian.honeytokens;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -12,6 +13,7 @@ import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.plugin.gitguardian.AbstractGitGuardianTrigger;
 import io.kestra.plugin.gitguardian.GitGuardianClient;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -22,11 +24,12 @@ import lombok.experimental.SuperBuilder;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 @SuperBuilder
 @ToString
@@ -39,9 +42,11 @@ import java.util.Set;
         Polls `GET /v1/honeytokens_events` at `interval` and starts one execution per poll carrying the new events, \
         oldest first, in `trigger.events` (at most `maxItemsPerPoll`, default 100; the rest fire on the next polls), \
         and the honeytokens they belong to in `trigger.honeytokens`, keyed by honeytoken ID (without their value). A honeytoken firing means someone used a decoy credential: treat it as an active \
-        intrusion signal. The watermark is kept in the flow namespace KV store and seeded at the current time on the \
-        first poll. The events endpoint has no date filter and can only be read newest first, so each poll reads the \
-        events back to the watermark, then delivers the oldest ones. Requires the `honeytokens:read` scope.
+        intrusion signal. The delivery state is kept in the flow namespace KV store and seeded at the current time on the \
+        first poll. The events endpoint has no date filter and can only be read newest first. GitGuardian can report a use \
+        late (for example after a CloudTrail delay), so each poll reads back one hour behind the newest delivered event, \
+        skips the event IDs already delivered, and delivers the oldest of the rest. A use reported more than one hour \
+        after a newer one was delivered is not delivered. Requires the `honeytokens:read` scope.
         """
 )
 @Plugin(
@@ -84,7 +89,7 @@ import java.util.Set;
 public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput<Trigger.Output> {
     private static final String SCOPE = "honeytokens:read";
     private static final int PAGE_SIZE = 100;
-    private static final Duration OVERLAP = Duration.ofSeconds(1);
+    private static final Duration LOOKBACK = Duration.ofHours(1);
 
     @Schema(title = "Only events of this honeytoken ID", description = "All honeytokens when omitted.")
     @PluginProperty(group = "processing")
@@ -94,11 +99,12 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
     public Optional<TriggerEvaluationResult> eval(ConditionContext conditionContext, TriggerContext context) throws Exception {
         var runContext = conditionContext.getRunContext();
         var kv = runContext.namespaceKv(context.getNamespace());
-        var key = watermarkKey("gitguardian_honeytokens", context.getFlowId(), context.getTriggerId());
+        var key = watermarkKey("gitguardian_honeytoken_events", context.getFlowId(), context.getTriggerId());
 
-        var watermark = readWatermark(kv, key).orElse(null);
-        if (watermark == null) {
-            persistWatermark(kv, key, new Watermark(Instant.now(), Set.of()));
+        var state = readState(kv, key, Seen.class).orElse(null);
+        if (state == null) {
+            var now = Instant.now();
+            persistState(kv, key, new Seen(now, now, Map.of()));
             runContext.logger().info("GitGuardian honeytokens trigger initialized; only events after now will fire.");
             return Optional.empty();
         }
@@ -111,8 +117,8 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
             query.put("ordering", "-triggered_at");
             query.put("per_page", PAGE_SIZE);
             query.values().removeIf(value -> value == null);
-            // The events endpoint has no date filter; newest first lets the walk stop at the first event older than the watermark.
-            var cutoff = watermark.getTimestamp().minus(OVERLAP);
+            // The endpoint has no date filter, so walk newest first down to the lookback cutoff; delivered IDs are skipped.
+            var cutoff = state.cutoff();
             client.walk("/honeytokens_events", query, SCOPE, HoneytokenEvent.class, page -> {
                 for (var event : page) {
                     if (event.getTriggeredAt() == null) {
@@ -122,7 +128,7 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
                     if (event.getTriggeredAt().isBefore(cutoff)) {
                         return false;
                     }
-                    if (!watermark.isDelivered(event.getTriggeredAt(), event.getId())) {
+                    if (!state.isDelivered(event.getId())) {
                         pending.add(event);
                     }
                 }
@@ -132,20 +138,60 @@ public class Trigger extends AbstractGitGuardianTrigger implements TriggerOutput
                 return Optional.empty();
             }
 
-            var cap = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
-            var batch = oldest(pending, cap, HoneytokenEvent::getTriggeredAt, HoneytokenEvent::getId);
+            var rMaxItemsPerPoll = runContext.render(maxItemsPerPoll).as(Integer.class).orElse(DEFAULT_MAX_ITEMS_PER_POLL);
+            var batch = oldest(pending, rMaxItemsPerPoll, HoneytokenEvent::getTriggeredAt, HoneytokenEvent::getId);
 
             var honeytokens = new LinkedHashMap<String, Honeytoken>();
             for (var honeytokenId : batch.stream().map(HoneytokenEvent::getHoneytokenId).filter(Objects::nonNull).distinct().toList()) {
                 try {
-                    honeytokens.put(honeytokenId, client.get("/honeytokens/" + GitGuardianClient.segment(honeytokenId), Map.of("show_token", false), SCOPE, Honeytoken.class));
+                    honeytokens.put(honeytokenId, client.get("/honeytokens/%s".formatted(GitGuardianClient.segment(honeytokenId)), Map.of("show_token", false), SCOPE, Honeytoken.class));
                 } catch (Exception e) {
                     runContext.logger().warn("Honeytoken {} fires without honeytoken details: {}", honeytokenId, e.getMessage());
                 }
             }
 
-            persistWatermark(kv, key, advance(watermark, batch, HoneytokenEvent::getTriggeredAt, HoneytokenEvent::getId));
+            persistState(kv, key, state.advance(batch));
             return Optional.of(TriggerService.generateEvaluationResult(this, conditionContext, Output.builder().events(batch).count(batch.size()).honeytokens(honeytokens).build()));
+        }
+    }
+
+    /**
+     * Delivery state that tolerates late reports: events are deduplicated by ID inside a lookback window behind the
+     * newest delivered event, instead of by a strict timestamp watermark that would drop a late event for good.
+     */
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Seen {
+        /** First poll time: events triggered before it are never delivered. */
+        private Instant floor;
+        private Instant newest;
+        /** Delivered event ID to its trigger time, only for events inside the lookback window. */
+        private Map<String, Instant> delivered;
+
+        Instant cutoff() {
+            var windowStart = newest.minus(LOOKBACK);
+            return windowStart.isAfter(floor) ? windowStart : floor;
+        }
+
+        boolean isDelivered(String eventId) {
+            return delivered != null && delivered.containsKey(eventId);
+        }
+
+        Seen advance(java.util.List<HoneytokenEvent> batch) {
+            var nextNewest = batch.stream().map(HoneytokenEvent::getTriggeredAt).max(Comparator.naturalOrder()).filter(newest::isBefore).orElse(newest);
+            var next = new Seen(floor, nextNewest, new HashMap<>());
+            var nextCutoff = next.cutoff();
+            if (delivered != null) {
+                delivered.forEach((id, at) -> {
+                    if (!at.isBefore(nextCutoff)) {
+                        next.delivered.put(id, at);
+                    }
+                });
+            }
+            batch.forEach(event -> next.delivered.put(event.getId(), event.getTriggeredAt()));
+            return next;
         }
     }
 

@@ -54,7 +54,7 @@ public class Reopen extends AbstractPublicIncidentAction implements RunnableTask
         runContext.logger().info("Reopening GitGuardian public incident {}", rIncidentId);
 
         try (var client = client(runContext)) {
-            var incident = client.post(incidentPath(rIncidentId) + "/reopen", null, WRITE_SCOPE, PublicIncident.class);
+            var incident = client.post(incidentPath(rIncidentId, "reopen"), null, WRITE_SCOPE, PublicIncident.class);
             return Output.builder().incident(requireIncident(incident, rIncidentId)).build();
         }
     }

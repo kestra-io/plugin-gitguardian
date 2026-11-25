@@ -72,7 +72,7 @@ public class Get extends AbstractGitGuardianTask implements RunnableTask<Get.Out
         runContext.logger().info("Fetching GitGuardian secret incident {}", rIncidentId);
 
         try (var client = client(runContext)) {
-            var incident = client.get("/incidents/secrets/" + rIncidentId, Map.of("with_occurrences", 0), SCOPE, Incident.class);
+            var incident = client.get("/incidents/secrets/%d".formatted(rIncidentId), Map.of("with_occurrences", 0), SCOPE, Incident.class);
             if (incident == null) {
                 throw new IllegalStateException("Empty response from the GitGuardian API for incident %d.".formatted(rIncidentId));
             }

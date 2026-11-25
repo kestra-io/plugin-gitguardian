@@ -86,9 +86,9 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
     @PluginProperty(group = "processing")
     private Property<Long> teamId;
 
-    @Schema(title = "Ordering", description = "`last_scan_date` or `-last_scan_date`.")
+    @Schema(title = "Ordering", description = "`LAST_SCAN_DATE` or `LAST_SCAN_DATE_DESC` (the API forms `last_scan_date` and `-last_scan_date` also work).")
     @PluginProperty(group = "processing")
-    private Property<String> ordering;
+    private Property<SourceOrdering> ordering;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -101,7 +101,7 @@ public class List extends AbstractListTask implements RunnableTask<List.Output> 
         var rStatuses = runContext.render(monitoringStatuses).asList(String.class);
         query.put("monitoring_status__in", rStatuses.isEmpty() ? null : rStatuses);
         query.put("team_id", runContext.render(teamId).as(Long.class).orElse(null));
-        query.put("ordering", runContext.render(ordering).as(String.class).orElse(null));
+        query.put("ordering", runContext.render(ordering).as(SourceOrdering.class).map(SourceOrdering::apiValue).orElse(null));
 
         try (var client = client(runContext)) {
             var result = list(runContext, client, "/sources", query, SCOPE, Source.class);

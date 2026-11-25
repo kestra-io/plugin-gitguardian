@@ -50,7 +50,7 @@ class ListTest {
             .severity(Property.ofValue(Severity.CRITICAL))
             .validity(Property.ofValue(Validity.VALID))
             .tags(Property.ofValue(java.util.List.of("PUBLICLY_EXPOSED", "FROM_HISTORICAL_SCAN")))
-            .ordering(Property.ofValue("-date"))
+            .ordering(Property.ofValue(IncidentOrdering.DATE_DESC))
             .build()
             .run(runContextFactory.of(Map.of()));
 

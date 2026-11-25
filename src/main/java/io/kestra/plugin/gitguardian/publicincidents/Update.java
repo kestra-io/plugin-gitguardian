@@ -85,7 +85,7 @@ public class Update extends AbstractPublicIncidentAction implements RunnableTask
         try (var client = client(runContext)) {
             PublicIncident incident = null;
             if (rSeverity != null) {
-                incident = client.post(incidentPath(rIncidentId) + "/set_severity", Map.of("severity", rSeverity.apiValue()), WRITE_SCOPE, PublicIncident.class);
+                incident = client.post(incidentPath(rIncidentId, "set_severity"), Map.of("severity", rSeverity.apiValue()), WRITE_SCOPE, PublicIncident.class);
             }
             if (!rCustomTags.isEmpty()) {
                 var tags = new ArrayList<Map<String, String>>();
@@ -95,7 +95,7 @@ public class Update extends AbstractPublicIncidentAction implements RunnableTask
                     tag.put("value", value == null || value.isBlank() ? null : value);
                     tags.add(tag);
                 });
-                incident = client.post(incidentPath(rIncidentId) + "/set_custom_tags", Map.of("custom_tags", tags), WRITE_SCOPE, PublicIncident.class);
+                incident = client.post(incidentPath(rIncidentId, "set_custom_tags"), Map.of("custom_tags", tags), WRITE_SCOPE, PublicIncident.class);
             }
             if (incident == null) {
                 incident = client.get(incidentPath(rIncidentId), null, "incidents:read", PublicIncident.class);

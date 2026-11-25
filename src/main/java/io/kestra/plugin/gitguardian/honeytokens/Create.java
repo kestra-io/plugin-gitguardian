@@ -137,10 +137,6 @@ public class Create extends AbstractGitGuardianTask implements RunnableTask<Crea
             } catch (GeneralSecurityException e) {
                 throw new IllegalStateException(NOT_ENCRYPTED.formatted(rName, honeytoken.getId(), e.getMessage()), e);
             }
-            // encrypt() returns its input unchanged without a configured key.
-            if (plainToken.equals(encryptedToken.getValue())) {
-                throw new IllegalStateException(NOT_ENCRYPTED.formatted(rName, honeytoken.getId(), "no encryption key is configured"));
-            }
             return Output.builder().honeytoken(honeytoken).encryptedToken(encryptedToken).build();
         }
     }
