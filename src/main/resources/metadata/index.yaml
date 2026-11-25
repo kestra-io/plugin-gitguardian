@@ -5,4 +5,4 @@ description: "GitGuardian plugin for Kestra"
 body: "Scan flow outputs and files for hardcoded secrets, register incidents for non-VCS data, react to new incidents, honeytoken events, audit log events and failing integrations, triage incidents, and export audit logs, all from Kestra flows through the GitGuardian public API."
 videos: []
 createdBy: "GitGuardian"
-managedBy: "GitGuardian"
+managedBy: "Kestra Core Team"
